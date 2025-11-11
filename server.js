@@ -35,7 +35,7 @@ app.use(cors({
 }));
 app.use(express.json({ limit: '10mb' }));
 
-// ✅ MongoDB Connection - แก้ไขแล้ว!
+// ✅ MongoDB Connection
 const mongoURI = process.env.MONGODB_URI;
 if (!mongoURI) {
   console.error('❌ MONGODB_URI is not defined in environment variables');
@@ -298,6 +298,7 @@ const createAdminUser = async () => {
   }
 };
 
+
 const createOfficialChat = async (userId) => {
   try {
     const systemUser = await User.findOne({ userType: 'system' });
@@ -307,24 +308,24 @@ const createOfficialChat = async (userId) => {
       return;
     }
 
-    // 🔥 แก้ไข: ตรวจสอบแชททางการที่มีอยู่ให้ละเอียดขึ้น
-    const existingChat = await Chat.findOne({
+    // 🔥 ตรวจสอบว่าผู้ใช้มีแชททางการอยู่แล้วหรือไม่
+    const existingOfficialChats = await Chat.find({
       participants: { 
-        $all: [userId, systemUser._id],
-        $size: 2 // ต้องมีผู้ใช้แค่ 2 คนเท่านั้น
+        $all: [userId, systemUser._id]
       },
       chatType: 'official',
       isActive: true
-    });
+    }).sort({ createdAt: -1 }); // เรียงจากใหม่ไปเก่า
 
-    if (!existingChat) {
+    if (existingOfficialChats.length === 0) {
+      // ไม่มีแชททางการ สร้างใหม่
       const officialChat = new Chat({
         participants: [userId, systemUser._id],
         chatType: 'official',
         title: 'Connect Support',
         lastMessage: 'สวัสดี! ยินดีต้อนรับสู่ Connect App เราพร้อมให้ความช่วยเหลือเสมอ',
         lastMessageTime: new Date(),
-        createdBy: systemUser._id // ใช้ system user เป็นผู้สร้าง
+        createdBy: systemUser._id
       });
 
       await officialChat.save();
@@ -338,8 +339,24 @@ const createOfficialChat = async (userId) => {
 
       await welcomeMessage.save();
       console.log('✅ Official chat created for user:', userId);
+    } else if (existingOfficialChats.length > 1) {
+      // มีแชททางการซ้ำกัน เก็บอันล่าสุด ลบอันที่เก่า
+      console.log(`🔄 Found ${existingOfficialChats.length} official chats for user ${userId}, cleaning duplicates...`);
+      
+      // เก็บแชทล่าสุด
+      const latestChat = existingOfficialChats[0];
+      const chatsToDelete = existingOfficialChats.slice(1);
+      
+      // ลบแชทที่ซ้ำกัน
+      for (const chat of chatsToDelete) {
+        await Message.deleteMany({ chatId: chat._id });
+        await Chat.deleteOne({ _id: chat._id });
+        console.log(`🗑️ Deleted duplicate official chat: ${chat._id}`);
+      }
+      
+      console.log(`✅ Kept latest official chat: ${latestChat._id} for user: ${userId}`);
     } else {
-      console.log('✅ Official chat already exists for user:', userId, 'chatId:', existingChat._id);
+      console.log('✅ Official chat already exists for user:', userId, 'chatId:', existingOfficialChats[0]._id);
     }
   } catch (error) {
     console.error('❌ Error creating official chat:', error);
@@ -450,7 +467,8 @@ app.get('/', (req, res) => {
       },
       admin: {
         officialChatsStatus: '/api/admin/official-chats-status',
-        cleanDuplicateChats: '/api/admin/clean-duplicate-official-chats'
+        cleanDuplicateChats: '/api/admin/clean-duplicate-official-chats',
+        forceCleanDuplicates: '/api/admin/force-clean-duplicates' // 🔥 ใหม่
       }
     }
   });
@@ -1472,6 +1490,7 @@ app.post('/api/register', validateRegistration, async (req, res) => {
 
       await newUser.save();
 
+      // 🔥 สร้างแชททางการ (1 user ต่อ 1 แชททางการเท่านั้น)
       await createOfficialChat(newUser._id);
 
       console.log('✅ User registered successfully:', newUser._id);
@@ -1546,6 +1565,7 @@ app.post('/api/login', validateLogin, async (req, res) => {
         user.failedLoginAttempts = 0;
         await user.save();
 
+        // 🔥 สร้าง/ตรวจสอบแชททางการ (1 user ต่อ 1 แชททางการเท่านั้น)
         await createOfficialChat(user._id);
 
         console.log('✅ Login successful for user:', user._id);
@@ -1966,7 +1986,7 @@ app.post('/api/profile/picture', authenticateToken, async (req, res) => {
   }
 });
 
-// 💬 Get User Chats (Protected)
+// 💬 Get User Chats (Protected) - 🔥 แก้ไขแล้ว: 1 user ต่อ 1 แชททางการ
 app.get('/api/chats', authenticateToken, async (req, res) => {
   try {
     console.log('💬 Fetching chats for user:', req.user._id);
@@ -1978,7 +1998,25 @@ app.get('/api/chats', authenticateToken, async (req, res) => {
     .populate('participants', 'username email userType profilePicture userId')
     .sort({ lastMessageTime: -1 });
 
-    const formattedChats = chats.map(chat => {
+    // 🔥 กรองแชททางการให้เหลือแค่ 1 อันเท่านั้น
+    const officialChats = chats.filter(chat => chat.chatType === 'official');
+    const normalChats = chats.filter(chat => chat.chatType !== 'official');
+    
+    let finalChats = [...normalChats];
+    
+    if (officialChats.length > 0) {
+      // ถ้ามีแชททางการมากกว่า 1 อัน ให้เลือกอันล่าสุด
+      const sortedOfficialChats = officialChats.sort((a, b) => 
+        new Date(b.lastMessageTime) - new Date(a.lastMessageTime)
+      );
+      finalChats.unshift(sortedOfficialChats[0]); // ใส่แชททางการอันล่าสุดไว้ด้านหน้า
+      
+      if (officialChats.length > 1) {
+        console.log(`🔥 Filtered official chats: 1 (was ${officialChats.length}) for user: ${req.user._id}`);
+      }
+    }
+
+    const formattedChats = finalChats.map(chat => {
       const otherParticipant = chat.participants.find(
         p => p._id.toString() !== req.user._id.toString()
       );
@@ -1998,7 +2036,7 @@ app.get('/api/chats', authenticateToken, async (req, res) => {
       };
     });
 
-    console.log('✅ Found', formattedChats.length, 'chats for user');
+    console.log('✅ Found', formattedChats.length, 'chats for user (official:', officialChats.length, 'normal:', normalChats.length + ')');
 
     res.json({
       success: true,
@@ -2523,6 +2561,92 @@ app.delete('/api/admin/clean-duplicate-official-chats', authenticateToken, async
   }
 });
 
+// 🔥 API ใหม่: บังคับลบแชททางการที่ซ้ำกันทั้งหมด
+app.delete('/api/admin/force-clean-duplicates', authenticateToken, async (req, res) => {
+  try {
+    if (req.user.userType !== 'admin') {
+      return res.status(403).json({
+        success: false,
+        error: 'Access denied. Admin only.'
+      });
+    }
+
+    const systemUser = await User.findOne({ userType: 'system' });
+    if (!systemUser) {
+      return res.status(404).json({
+        success: false,
+        error: 'System user not found'
+      });
+    }
+
+    console.log('💥 FORCE Cleaning all duplicate official chats...');
+
+    const officialChats = await Chat.find({
+      chatType: 'official',
+      'participants': systemUser._id
+    }).populate('participants');
+
+    console.log(`📊 Found ${officialChats.length} official chats`);
+
+    const userLatestChatMap = new Map();
+    const allChatsToDelete = [];
+
+    // หาแชทล่าสุดสำหรับแต่ละ user
+    officialChats.forEach(chat => {
+      const normalUsers = chat.participants.filter(p => 
+        p._id.toString() !== systemUser._id.toString() && p.userType !== 'system'
+      );
+
+      normalUsers.forEach(user => {
+        const userKey = user._id.toString();
+        const existingChat = userLatestChatMap.get(userKey);
+        
+        if (!existingChat || chat.createdAt > existingChat.createdAt) {
+          // ถ้ายังไม่มีแชท หรือเจอแชทที่ใหม่กว่า
+          if (existingChat) {
+            allChatsToDelete.push(existingChat._id);
+          }
+          userLatestChatMap.set(userKey, chat);
+        } else {
+          // แชทปัจจุบันเก่ากว่า, ลบทิ้ง
+          allChatsToDelete.push(chat._id);
+        }
+      });
+    });
+
+    console.log(`🗑️ Preparing to delete ${allChatsToDelete.length} duplicate chats`);
+
+    // ลบแชทที่ซ้ำกันทั้งหมด
+    if (allChatsToDelete.length > 0) {
+      await Chat.deleteMany({ _id: { $in: allChatsToDelete } });
+      await Message.deleteMany({ chatId: { $in: allChatsToDelete } });
+      console.log(`✅ Force deleted ${allChatsToDelete.length} duplicate official chats`);
+    }
+
+    res.json({
+      success: true,
+      message: `Force cleaned ${allChatsToDelete.length} duplicate official chats`,
+      remainingUsers: userLatestChatMap.size,
+      deletedChats: allChatsToDelete.length,
+      details: {
+        totalUsers: userLatestChatMap.size,
+        totalDeleted: allChatsToDelete.length,
+        keptLatestChats: Array.from(userLatestChatMap.values()).map(chat => ({
+          chatId: chat._id,
+          user: chat.participants.find(p => p._id.toString() !== systemUser._id.toString())?.username
+        }))
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Force clean duplicates error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to force clean duplicates'
+    });
+  }
+});
+
 // 🏥 Health Check
 app.get('/api/health', (req, res) => {
   res.json({
@@ -2571,6 +2695,7 @@ const startServer = async () => {
     console.log('   • 🚫 Account Lockout Protection');
     console.log('   • 📧 Email Format Validation');
     console.log('   • 🗃️ Database Indexing for Performance');
+    console.log('🔥 OFFICIAL CHAT POLICY: 1 USER = 1 OFFICIAL CHAT');
     console.log('🚀 =================================');
   });
 };
