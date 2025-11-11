@@ -36,7 +36,7 @@ app.use(cors({
 app.use(express.json({ limit: '10mb' }));
 
 // ✅ MongoDB Connection - ใช้ Environment Variable
-mongoose.connect(process.env.MONGODB_URI || 'mongodb://mongo:27017/connect_app', {
+mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/connect_app', {
   useNewUrlParser: true,
   useUnifiedTopology: true,
 });
