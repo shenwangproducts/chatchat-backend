@@ -35,14 +35,16 @@ app.use(cors({
 }));
 app.use(express.json({ limit: '10mb' }));
 
-// ✅ MongoDB Connection - ใช้ Environment Variable
-mongoose.connect(process.env.MONGO_URL || process.env.MONGODB_URI || 'mongodb://localhost:27017/connect_app', {
+// ✅ MongoDB Connection - แก้ไขแล้ว!
+const mongoURI = process.env.MONGODB_URI;
+if (!mongoURI) {
+  console.error('❌ MONGODB_URI is not defined in environment variables');
+  process.exit(1);
+}
+
+mongoose.connect(mongoURI, {
   useNewUrlParser: true,
-  useUnifiedTopology: true,
-  ssl: true,
-  tlsAllowInvalidCertificates: false,
-  retryWrites: true,
-  w: 'majority'
+  useUnifiedTopology: true
 });
 
 const db = mongoose.connection;
@@ -335,6 +337,7 @@ const initializeMourningSettings = async () => {
     return mourningSettings;
   } catch (error) {
     console.error('❌ Error initializing mourning settings:', error);
+    return null;
   }
 };
 
@@ -546,9 +549,62 @@ app.post('/api/chats', authenticateToken, async (req, res) => {
       $expr: { $eq: [{ $size: "$participants" }, uniqueParticipants.length] }
     }).populate('participants', 'userId username name email profilePicture');
 
-    if (existingChat) {
+    if (!existingChat) {
+      // สร้างชื่อแชทจากชื่อผู้ใช้
+      const otherUsers = users.filter(user => user._id.toString() !== userId.toString());
+      const chatTitle = otherUsers.map(user => user.username).join(', ');
+
+      // สร้างแชทใหม่
+      const newChat = new Chat({
+        participants: uniqueParticipants,
+        chatType: 'direct',
+        title: chatTitle,
+        lastMessage: 'เริ่มการสนทนา',
+        lastMessageTime: new Date(),
+        createdBy: userId,
+        createdAt: new Date(),
+        updatedAt: new Date()
+      });
+
+      await newChat.save();
+
+      // Populate ข้อมูลผู้ใช้
+      await newChat.populate('participants', 'userId username name email profilePicture');
+
+      console.log('✅ New chat created successfully:', {
+        chatId: newChat._id,
+        participants: newChat.participants.map(p => p.username),
+        createdBy: req.user.username
+      });
+
+      // สร้างข้อความเริ่มต้น
+      const welcomeMessage = new Message({
+        chatId: newChat._id,
+        senderId: userId,
+        messageType: 'system',
+        content: 'เริ่มการสนทนา',
+        timestamp: new Date()
+      });
+
+      await welcomeMessage.save();
+
+      res.json({
+        success: true,
+        chat: {
+          id: newChat._id,
+          _id: newChat._id,
+          participants: newChat.participants,
+          chatType: newChat.chatType,
+          title: newChat.title,
+          createdAt: newChat.createdAt,
+          lastMessage: newChat.lastMessage,
+          lastMessageTime: newChat.lastMessageTime
+        },
+        message: 'Chat created successfully'
+      });
+    } else {
       console.log('✅ Using existing chat:', existingChat._id);
-      return res.json({
+      res.json({
         success: true,
         chat: {
           id: existingChat._id,
@@ -563,59 +619,6 @@ app.post('/api/chats', authenticateToken, async (req, res) => {
         message: 'Chat already exists'
       });
     }
-
-    // สร้างชื่อแชทจากชื่อผู้ใช้
-    const otherUsers = users.filter(user => user._id.toString() !== userId.toString());
-    const chatTitle = otherUsers.map(user => user.username).join(', ');
-
-    // สร้างแชทใหม่
-    const newChat = new Chat({
-      participants: uniqueParticipants,
-      chatType: 'direct',
-      title: chatTitle,
-      lastMessage: 'เริ่มการสนทนา',
-      lastMessageTime: new Date(),
-      createdBy: userId,
-      createdAt: new Date(),
-      updatedAt: new Date()
-    });
-
-    await newChat.save();
-
-    // Populate ข้อมูลผู้ใช้
-    await newChat.populate('participants', 'userId username name email profilePicture');
-
-    console.log('✅ New chat created successfully:', {
-      chatId: newChat._id,
-      participants: newChat.participants.map(p => p.username),
-      createdBy: req.user.username
-    });
-
-    // สร้างข้อความเริ่มต้น
-    const welcomeMessage = new Message({
-      chatId: newChat._id,
-      senderId: userId,
-      messageType: 'system',
-      content: 'เริ่มการสนทนา',
-      timestamp: new Date()
-    });
-
-    await welcomeMessage.save();
-
-    res.json({
-      success: true,
-      chat: {
-        id: newChat._id,
-        _id: newChat._id,
-        participants: newChat.participants,
-        chatType: newChat.chatType,
-        title: newChat.title,
-        createdAt: newChat.createdAt,
-        lastMessage: newChat.lastMessage,
-        lastMessageTime: newChat.lastMessageTime
-      },
-      message: 'Chat created successfully'
-    });
 
   } catch (error) {
     console.error('❌ Error creating chat:', error);
@@ -750,7 +753,7 @@ app.get('/api/users/search', authenticateToken, async (req, res) => {
   }
 });
 
-// 👥 Send Friend Request (Protected) - แก้ไขเวอร์ชัน
+// 👥 Send Friend Request (Protected)
 app.post('/api/friends/request', authenticateToken, async (req, res) => {
   try {
     const { targetUserId } = req.body;
@@ -776,32 +779,12 @@ app.post('/api/friends/request', authenticateToken, async (req, res) => {
       isActive: true 
     });
     
-    console.log('🔍 Target user search by userId:', {
-      targetUserId: targetUserId,
-      found: !!targetUser,
-      targetUser: targetUser ? {
-        id: targetUser._id,
-        userId: targetUser.userId,
-        username: targetUser.username
-      } : null
-    });
-
     // If not found by userId, try by _id
-    if (!targetUser) {
-      try {
-        if (mongoose.Types.ObjectId.isValid(targetUserId)) {
-          targetUser = await User.findOne({ 
-            _id: targetUserId,
-            isActive: true 
-          });
-          console.log('🔍 Target user search by _id:', {
-            targetUserId: targetUserId,
-            found: !!targetUser
-          });
-        }
-      } catch (error) {
-        console.log('❌ Error searching by _id:', error.message);
-      }
+    if (!targetUser && mongoose.Types.ObjectId.isValid(targetUserId)) {
+      targetUser = await User.findOne({ 
+        _id: targetUserId,
+        isActive: true 
+      });
     }
 
     if (!targetUser) {
@@ -865,11 +848,8 @@ app.post('/api/friends/request', authenticateToken, async (req, res) => {
       status: 'pending'
     });
 
-    console.log('💾 Saving friend request...');
     await friendRequest.save();
     console.log('✅ Friend request saved successfully:', friendRequest._id);
-
-    console.log('🎉 Friend request sent successfully!');
 
     res.json({
       success: true,
@@ -884,10 +864,6 @@ app.post('/api/friends/request', authenticateToken, async (req, res) => {
 
   } catch (error) {
     console.error('❌ Send friend request error:', error);
-    console.error('❌ Error details:', {
-      message: error.message,
-      stack: error.stack
-    });
     res.status(500).json({
       success: false,
       error: 'Failed to send friend request: ' + error.message
@@ -1436,47 +1412,47 @@ app.post('/api/register', validateRegistration, async (req, res) => {
     console.log('👤 User registration attempt:', { username, email });
 
     const existingUser = await User.findOne({ email });
-    if (existingUser) {
+    if (!existingUser) {
+      const salt = generateSalt();
+      const passwordHash = hashPassword(password, salt);
+      const authToken = generateAuthToken(new mongoose.Types.ObjectId());
+
+      const newUser = new User({
+        username: username.trim(),
+        email: email.trim().toLowerCase(),
+        passwordHash,
+        passwordSalt: salt,
+        authToken,
+        tokenExpiry: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+        settings: { 
+          language: language,
+          theme: theme
+        }
+      });
+
+      await newUser.save();
+
+      await createOfficialChat(newUser._id);
+
+      console.log('✅ User registered successfully:', newUser._id);
+
+      res.status(201).json({
+        success: true,
+        message: 'User registered successfully',
+        user: {
+          id: newUser._id,
+          username: newUser.username,
+          email: newUser.email,
+          settings: newUser.settings
+        },
+        authToken
+      });
+    } else {
       return res.status(400).json({
         success: false,
         error: 'Email already registered'
       });
     }
-
-    const salt = generateSalt();
-    const passwordHash = hashPassword(password, salt);
-    const authToken = generateAuthToken(new mongoose.Types.ObjectId());
-
-    const newUser = new User({
-      username: username.trim(),
-      email: email.trim().toLowerCase(),
-      passwordHash,
-      passwordSalt: salt,
-      authToken,
-      tokenExpiry: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-      settings: { 
-        language: language,
-        theme: theme
-      }
-    });
-
-    await newUser.save();
-
-    await createOfficialChat(newUser._id);
-
-    console.log('✅ User registered successfully:', newUser._id);
-
-    res.status(201).json({
-      success: true,
-      message: 'User registered successfully',
-      user: {
-        id: newUser._id,
-        username: newUser.username,
-        email: newUser.email,
-        settings: newUser.settings
-      },
-      authToken
-    });
 
   } catch (error) {
     console.error('❌ Registration error:', error);
@@ -1503,68 +1479,68 @@ app.post('/api/login', validateLogin, async (req, res) => {
     console.log('🔐 Login attempt for email:', email);
 
     const user = await User.findOne({ email: email.trim().toLowerCase() });
-    if (!user) {
+    if (user) {
+      // ✅ Rate limiting for failed attempts
+      if (user.failedLoginAttempts >= 5) {
+        const lockoutTime = 15 * 60 * 1000; // 15 minutes
+        const timeSinceLastAttempt = Date.now() - (user.lastLogin?.getTime() || 0);
+        
+        if (timeSinceLastAttempt < lockoutTime) {
+          return res.status(429).json({
+            success: false,
+            error: 'Account temporarily locked due to too many failed attempts'
+          });
+        } else {
+          // Reset failed attempts after lockout period
+          user.failedLoginAttempts = 0;
+        }
+      }
+
+      const isValid = verifyPassword(password, user.passwordHash, user.passwordSalt);
+      if (isValid) {
+        const authToken = generateAuthToken(user._id);
+        
+        user.authToken = authToken;
+        user.tokenExpiry = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+        user.lastLogin = new Date();
+        user.failedLoginAttempts = 0;
+        await user.save();
+
+        await createOfficialChat(user._id);
+
+        console.log('✅ Login successful for user:', user._id);
+
+        res.json({
+          success: true,
+          message: 'Login successful',
+          user: {
+            id: user._id,
+            username: user.username,
+            email: user.email,
+            settings: user.settings,
+            profilePicture: user.profilePicture,
+            userId: user.userId
+          },
+          authToken
+        });
+      } else {
+        user.failedLoginAttempts += 1;
+        user.lastLogin = new Date();
+        await user.save();
+        
+        console.log('❌ Invalid password for user:', email);
+        return res.status(400).json({
+          success: false,
+          error: 'Invalid email or password'
+        });
+      }
+    } else {
       console.log('❌ User not found:', email);
       return res.status(400).json({
         success: false,
         error: 'Invalid email or password'
       });
     }
-
-    // ✅ Rate limiting for failed attempts
-    if (user.failedLoginAttempts >= 5) {
-      const lockoutTime = 15 * 60 * 1000; // 15 minutes
-      const timeSinceLastAttempt = Date.now() - user.lastLogin.getTime();
-      
-      if (timeSinceLastAttempt < lockoutTime) {
-        return res.status(429).json({
-          success: false,
-          error: 'Account temporarily locked due to too many failed attempts'
-        });
-      } else {
-        // Reset failed attempts after lockout period
-        user.failedLoginAttempts = 0;
-      }
-    }
-
-    const isValid = verifyPassword(password, user.passwordHash, user.passwordSalt);
-    if (!isValid) {
-      user.failedLoginAttempts += 1;
-      user.lastLogin = new Date();
-      await user.save();
-      
-      console.log('❌ Invalid password for user:', email);
-      return res.status(400).json({
-        success: false,
-        error: 'Invalid email or password'
-      });
-    }
-
-    const authToken = generateAuthToken(user._id);
-    
-    user.authToken = authToken;
-    user.tokenExpiry = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
-    user.lastLogin = new Date();
-    user.failedLoginAttempts = 0;
-    await user.save();
-
-    await createOfficialChat(user._id);
-
-    console.log('✅ Login successful for user:', user._id);
-
-    res.json({
-      success: true,
-      message: 'Login successful',
-      user: {
-        id: user._id,
-        username: user.username,
-        email: user.email,
-        settings: user.settings,
-        profilePicture: user.profilePicture,
-        userId: user.userId
-      },
-      authToken
-    });
 
   } catch (error) {
     console.error('❌ Login error:', error);
@@ -1628,37 +1604,57 @@ app.put('/api/profile', authenticateToken, [
         username: username.trim()
       });
 
-      if (existingUser) {
+      if (!existingUser) {
+        req.user.username = username.trim();
+        
+        if (profilePicture) {
+          req.user.profilePicture = profilePicture;
+        }
+        
+        req.user.updatedAt = new Date();
+
+        await req.user.save();
+
+        console.log('✅ Profile updated successfully');
+
+        res.json({
+          success: true,
+          message: 'Profile updated successfully',
+          user: {
+            id: req.user._id,
+            username: req.user.username,
+            email: req.user.email,
+            profilePicture: req.user.profilePicture,
+            settings: req.user.settings
+          }
+        });
+      } else {
         return res.status(400).json({
           success: false,
           error: 'Username already taken'
         });
       }
-    }
-
-    req.user.username = username.trim();
-    
-    if (profilePicture) {
-      req.user.profilePicture = profilePicture;
-    }
-    
-    req.user.updatedAt = new Date();
-
-    await req.user.save();
-
-    console.log('✅ Profile updated successfully');
-
-    res.json({
-      success: true,
-      message: 'Profile updated successfully',
-      user: {
-        id: req.user._id,
-        username: req.user.username,
-        email: req.user.email,
-        profilePicture: req.user.profilePicture,
-        settings: req.user.settings
+    } else {
+      if (profilePicture) {
+        req.user.profilePicture = profilePicture;
+        req.user.updatedAt = new Date();
+        await req.user.save();
       }
-    });
+
+      console.log('✅ Profile updated successfully');
+
+      res.json({
+        success: true,
+        message: 'Profile updated successfully',
+        user: {
+          id: req.user._id,
+          username: req.user.username,
+          email: req.user.email,
+          profilePicture: req.user.profilePicture,
+          settings: req.user.settings
+        }
+      });
+    }
 
   } catch (error) {
     console.error('❌ Update profile error:', error);
@@ -1731,37 +1727,37 @@ app.put('/api/user/change-id', authenticateToken, [
       userId: newUserId 
     });
 
-    if (existingUser) {
+    if (!existingUser) {
+      const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+      if (!req.user.lastUserIdChange || req.user.lastUserIdChange <= thirtyDaysAgo) {
+        const oldUserId = req.user.userId;
+        req.user.userId = newUserId;
+        req.user.lastUserIdChange = new Date();
+        req.user.updatedAt = new Date();
+
+        await req.user.save();
+
+        console.log('✅ User ID changed successfully:', { oldUserId, newUserId });
+
+        res.json({
+          success: true,
+          message: 'User ID changed successfully',
+          newUserId: newUserId,
+          nextChangeDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
+        });
+      } else {
+        const daysLeft = Math.ceil((req.user.lastUserIdChange.getTime() - thirtyDaysAgo.getTime()) / (24 * 60 * 60 * 1000));
+        return res.status(400).json({
+          success: false,
+          error: `You can change User ID again in ${daysLeft} days`
+        });
+      }
+    } else {
       return res.status(400).json({
         success: false,
         error: 'User ID already taken'
       });
     }
-
-    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-    if (req.user.lastUserIdChange && req.user.lastUserIdChange > thirtyDaysAgo) {
-      const daysLeft = Math.ceil((req.user.lastUserIdChange.getTime() - thirtyDaysAgo.getTime()) / (24 * 60 * 60 * 1000));
-      return res.status(400).json({
-        success: false,
-        error: `You can change User ID again in ${daysLeft} days`
-      });
-    }
-
-    const oldUserId = req.user.userId;
-    req.user.userId = newUserId;
-    req.user.lastUserIdChange = new Date();
-    req.user.updatedAt = new Date();
-
-    await req.user.save();
-
-    console.log('✅ User ID changed successfully:', { oldUserId, newUserId });
-
-    res.json({
-      success: true,
-      message: 'User ID changed successfully',
-      newUserId: newUserId,
-      nextChangeDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
-    });
 
   } catch (error) {
     console.error('❌ Change User ID error:', error);
@@ -1800,33 +1796,33 @@ app.post('/api/user/change-email', authenticateToken, [
       email: newEmail.toLowerCase().trim()
     });
 
-    if (existingUser) {
+    if (!existingUser) {
+      if (req.user.email !== newEmail.toLowerCase().trim()) {
+        const oldEmail = req.user.email;
+        req.user.email = newEmail.toLowerCase().trim();
+        req.user.updatedAt = new Date();
+
+        await req.user.save();
+
+        console.log('✅ Email changed successfully:', { oldEmail, newEmail });
+
+        res.json({
+          success: true,
+          message: 'Email changed successfully',
+          newEmail: newEmail
+        });
+      } else {
+        return res.status(400).json({
+          success: false,
+          error: 'This is already your current email'
+        });
+      }
+    } else {
       return res.status(400).json({
         success: false,
         error: 'Email already registered'
       });
     }
-
-    if (req.user.email === newEmail.toLowerCase().trim()) {
-      return res.status(400).json({
-        success: false,
-        error: 'This is already your current email'
-      });
-    }
-    
-    const oldEmail = req.user.email;
-    req.user.email = newEmail.toLowerCase().trim();
-    req.user.updatedAt = new Date();
-
-    await req.user.save();
-
-    console.log('✅ Email changed successfully:', { oldEmail, newEmail });
-
-    res.json({
-      success: true,
-      message: 'Email changed successfully',
-      newEmail: newEmail
-    });
 
   } catch (error) {
     console.error('❌ Change email error:', error);
@@ -1884,42 +1880,42 @@ app.post('/api/profile/picture', authenticateToken, async (req, res) => {
 
     console.log('🖼️ Profile picture upload for user:', req.user._id);
 
-    if (!imageData) {
+    if (imageData) {
+      if (imageData.startsWith('data:image/')) {
+        const base64Data = imageData.replace(/^data:image\/\w+;base64,/, '');
+        const buffer = Buffer.from(base64Data, 'base64');
+        
+        if (buffer.length <= 2 * 1024 * 1024) {
+          req.user.profilePicture = imageData;
+          req.user.updatedAt = new Date();
+
+          await req.user.save();
+
+          console.log('✅ Profile picture uploaded successfully');
+
+          res.json({
+            success: true,
+            message: 'Profile picture uploaded successfully',
+            profilePicture: imageData
+          });
+        } else {
+          return res.status(400).json({
+            success: false,
+            error: 'Image size too large. Maximum 2MB allowed.'
+          });
+        }
+      } else {
+        return res.status(400).json({
+          success: false,
+          error: 'Invalid image format. Please use base64 encoded image.'
+        });
+      }
+    } else {
       return res.status(400).json({
         success: false,
         error: 'Image data is required'
       });
     }
-
-    if (!imageData.startsWith('data:image/')) {
-      return res.status(400).json({
-        success: false,
-        error: 'Invalid image format. Please use base64 encoded image.'
-      });
-    }
-
-    const base64Data = imageData.replace(/^data:image\/\w+;base64,/, '');
-    const buffer = Buffer.from(base64Data, 'base64');
-    
-    if (buffer.length > 2 * 1024 * 1024) {
-      return res.status(400).json({
-        success: false,
-        error: 'Image size too large. Maximum 2MB allowed.'
-      });
-    }
-
-    req.user.profilePicture = imageData;
-    req.user.updatedAt = new Date();
-
-    await req.user.save();
-
-    console.log('✅ Profile picture uploaded successfully');
-
-    res.json({
-      success: true,
-      message: 'Profile picture uploaded successfully',
-      profilePicture: imageData
-    });
 
   } catch (error) {
     console.error('❌ Upload profile picture error:', error);
@@ -1990,44 +1986,44 @@ app.get('/api/chats/:chatId/messages', authenticateToken, async (req, res) => {
       participants: req.user._id
     });
 
-    if (!chat) {
+    if (chat) {
+      const messages = await Message.find({ 
+        chatId,
+        isDeleted: false
+      })
+        .populate('senderId', 'username userType profilePicture userId')
+        .sort({ timestamp: 1 });
+
+      const formattedMessages = messages.map(msg => {
+        const isMe = msg.senderId._id.toString() === req.user._id.toString();
+        const isSystem = msg.senderId.userType === 'system';
+        
+        return {
+          id: msg._id,
+          sender: msg.senderId.username,
+          message: msg.content,
+          timestamp: msg.timestamp,
+          isMe: isMe,
+          isSystem: isSystem,
+          messageType: msg.messageType,
+          isDeleted: false,
+          profilePicture: msg.senderId.profilePicture,
+          senderId: msg.senderId.userId || msg.senderId._id.toString()
+        };
+      });
+
+      console.log('✅ Found', formattedMessages.length, 'messages for chat');
+
+      res.json({
+        success: true,
+        messages: formattedMessages
+      });
+    } else {
       return res.status(404).json({
         success: false,
         error: 'Chat not found'
       });
     }
-
-    const messages = await Message.find({ 
-      chatId,
-      isDeleted: false
-    })
-      .populate('senderId', 'username userType profilePicture userId')
-      .sort({ timestamp: 1 });
-
-    const formattedMessages = messages.map(msg => {
-      const isMe = msg.senderId._id.toString() === req.user._id.toString();
-      const isSystem = msg.senderId.userType === 'system';
-      
-      return {
-        id: msg._id,
-        sender: msg.senderId.username,
-        message: msg.content,
-        timestamp: msg.timestamp,
-        isMe: isMe,
-        isSystem: isSystem,
-        messageType: msg.messageType,
-        isDeleted: false,
-        profilePicture: msg.senderId.profilePicture,
-        senderId: msg.senderId.userId || msg.senderId._id.toString()
-      };
-    });
-
-    console.log('✅ Found', formattedMessages.length, 'messages for chat');
-
-    res.json({
-      success: true,
-      messages: formattedMessages
-    });
 
   } catch (error) {
     console.error('❌ Get messages error:', error);
@@ -2051,51 +2047,51 @@ app.post('/api/chats/:chatId/messages', authenticateToken, async (req, res) => {
       participants: req.user._id
     });
 
-    if (!chat) {
+    if (chat) {
+      const newMessage = new Message({
+        chatId,
+        senderId: req.user._id,
+        messageType,
+        content
+      });
+
+      await newMessage.save();
+
+      chat.lastMessage = content;
+      chat.lastMessageTime = new Date();
+      
+      chat.unreadCount.set(req.user._id.toString(), 0);
+      
+      chat.participants.forEach(participantId => {
+        if (participantId.toString() !== req.user._id.toString()) {
+          const currentCount = chat.unreadCount.get(participantId.toString()) || 0;
+          chat.unreadCount.set(participantId.toString(), currentCount + 1);
+        }
+      });
+
+      await chat.save();
+
+      console.log('✅ Message sent successfully');
+
+      res.json({
+        success: true,
+        message: {
+          id: newMessage._id,
+          sender: req.user.username,
+          message: content,
+          timestamp: newMessage.timestamp,
+          isMe: true,
+          isSystem: false,
+          messageType,
+          profilePicture: req.user.profilePicture
+        }
+      });
+    } else {
       return res.status(404).json({
         success: false,
         error: 'Chat not found'
       });
     }
-
-    const newMessage = new Message({
-      chatId,
-      senderId: req.user._id,
-      messageType,
-      content
-    });
-
-    await newMessage.save();
-
-    chat.lastMessage = content;
-    chat.lastMessageTime = new Date();
-    
-    chat.unreadCount.set(req.user._id.toString(), 0);
-    
-    chat.participants.forEach(participantId => {
-      if (participantId.toString() !== req.user._id.toString()) {
-        const currentCount = chat.unreadCount.get(participantId.toString()) || 0;
-        chat.unreadCount.set(participantId.toString(), currentCount + 1);
-      }
-    });
-
-    await chat.save();
-
-    console.log('✅ Message sent successfully');
-
-    res.json({
-      success: true,
-      message: {
-        id: newMessage._id,
-        sender: req.user.username,
-        message: content,
-        timestamp: newMessage.timestamp,
-        isMe: true,
-        isSystem: false,
-        messageType,
-        profilePicture: req.user.profilePicture
-      }
-    });
 
   } catch (error) {
     console.error('❌ Send message error:', error);
@@ -2118,52 +2114,52 @@ app.put('/api/chats/:chatId/messages/:messageId/delete', authenticateToken, asyn
       participants: req.user._id
     });
 
-    if (!chat) {
+    if (chat) {
+      const message = await Message.findOne({
+        _id: messageId,
+        chatId: chatId
+      });
+
+      if (message) {
+        if (message.senderId.toString() === req.user._id.toString()) {
+          message.isDeleted = true;
+          message.deletedAt = new Date();
+          message.deletedBy = req.user._id;
+          message.originalContent = message.content;
+          message.content = 'ข้อความนี้ถูกลบแล้ว';
+          message.messageType = 'deleted';
+
+          await message.save();
+
+          console.log('✅ Message soft deleted successfully');
+
+          res.json({
+            success: true,
+            message: 'Message deleted successfully',
+            deletedMessage: {
+              id: message._id,
+              isDeleted: true,
+              deletedAt: message.deletedAt
+            }
+          });
+        } else {
+          return res.status(403).json({
+            success: false,
+            error: 'You can only delete your own messages'
+          });
+        }
+      } else {
+        return res.status(404).json({
+          success: false,
+          error: 'Message not found'
+        });
+      }
+    } else {
       return res.status(404).json({
         success: false,
         error: 'Chat not found'
       });
     }
-
-    const message = await Message.findOne({
-      _id: messageId,
-      chatId: chatId
-    });
-
-    if (!message) {
-      return res.status(404).json({
-        success: false,
-        error: 'Message not found'
-      });
-    }
-
-    if (message.senderId.toString() !== req.user._id.toString()) {
-      return res.status(403).json({
-        success: false,
-        error: 'You can only delete your own messages'
-      });
-    }
-
-    message.isDeleted = true;
-    message.deletedAt = new Date();
-    message.deletedBy = req.user._id;
-    message.originalContent = message.content;
-    message.content = 'ข้อความนี้ถูกลบแล้ว';
-    message.messageType = 'deleted';
-
-    await message.save();
-
-    console.log('✅ Message soft deleted successfully');
-
-    res.json({
-      success: true,
-      message: 'Message deleted successfully',
-      deletedMessage: {
-        id: message._id,
-        isDeleted: true,
-        deletedAt: message.deletedAt
-      }
-    });
 
   } catch (error) {
     console.error('❌ Soft delete message error:', error);
@@ -2187,60 +2183,60 @@ app.put('/api/chats/:chatId/messages/:messageId', authenticateToken, async (req,
       participants: req.user._id
     });
 
-    if (!chat) {
+    if (chat) {
+      const message = await Message.findOne({
+        _id: messageId,
+        chatId: chatId
+      });
+
+      if (message) {
+        if (message.senderId.toString() === req.user._id.toString()) {
+          if (!message.isDeleted) {
+            message.content = content;
+            message.updatedAt = new Date();
+
+            await message.save();
+
+            if (chat.lastMessage === message.originalContent) {
+              chat.lastMessage = content;
+              await chat.save();
+            }
+
+            console.log('✅ Message updated successfully');
+
+            res.json({
+              success: true,
+              message: 'Message updated successfully',
+              updatedMessage: {
+                id: message._id,
+                content: message.content,
+                updatedAt: message.updatedAt
+              }
+            });
+          } else {
+            return res.status(400).json({
+              success: false,
+              error: 'Cannot edit deleted message'
+            });
+          }
+        } else {
+          return res.status(403).json({
+            success: false,
+            error: 'You can only edit your own messages'
+          });
+        }
+      } else {
+        return res.status(404).json({
+          success: false,
+          error: 'Message not found'
+        });
+      }
+    } else {
       return res.status(404).json({
         success: false,
         error: 'Chat not found'
       });
     }
-
-    const message = await Message.findOne({
-      _id: messageId,
-      chatId: chatId
-    });
-
-    if (!message) {
-      return res.status(404).json({
-        success: false,
-        error: 'Message not found'
-      });
-    }
-
-    if (message.senderId.toString() !== req.user._id.toString()) {
-      return res.status(403).json({
-        success: false,
-        error: 'You can only edit your own messages'
-      });
-    }
-
-    if (message.isDeleted) {
-      return res.status(400).json({
-        success: false,
-        error: 'Cannot edit deleted message'
-      });
-    }
-
-    message.content = content;
-    message.updatedAt = new Date();
-
-    await message.save();
-
-    if (chat.lastMessage === message.originalContent) {
-      chat.lastMessage = content;
-      await chat.save();
-    }
-
-    console.log('✅ Message updated successfully');
-
-    res.json({
-      success: true,
-      message: 'Message updated successfully',
-      updatedMessage: {
-        id: message._id,
-        content: message.content,
-        updatedAt: message.updatedAt
-      }
-    });
 
   } catch (error) {
     console.error('❌ Update message error:', error);
@@ -2262,53 +2258,53 @@ app.post('/api/agora/token', authenticateToken, async (req, res) => {
       uid: uid
     });
 
-    if (!channelName) {
+    if (channelName) {
+      // 🔑 Agora Configuration (เพิ่มใน .env ของคุณ)
+      const AGORA_APP_ID = process.env.AGORA_APP_ID || "5c57b43b4d544f51be764b8672ac06bf";
+      const AGORA_APP_CERTIFICATE = process.env.AGORA_APP_CERTIFICATE;
+
+      if (AGORA_APP_CERTIFICATE) {
+        // ต้องติดตั้ง package ก่อน: npm install agora-token
+        const { RtcTokenBuilder, RtcRole } = require('agora-token');
+
+        // คำนวณ expiration time (1 ชั่วโมง)
+        const expirationTimeInSeconds = 3600;
+        const currentTimestamp = Math.floor(Date.now() / 1000);
+        const privilegeExpiredTs = currentTimestamp + expirationTimeInSeconds;
+
+        // สร้าง token
+        const token = RtcTokenBuilder.buildTokenWithUid(
+          AGORA_APP_ID,
+          AGORA_APP_CERTIFICATE,
+          channelName,
+          uid,
+          RtcRole.PUBLISHER,
+          privilegeExpiredTs
+        );
+
+        console.log('✅ Agora token generated successfully for channel:', channelName);
+
+        res.json({
+          success: true,
+          token: token,
+          channelName: channelName,
+          uid: uid,
+          expiresIn: expirationTimeInSeconds,
+          appId: AGORA_APP_ID
+        });
+      } else {
+        console.error('❌ Agora certificate not configured');
+        return res.status(500).json({ 
+          success: false, 
+          error: 'Agora service not configured' 
+        });
+      }
+    } else {
       return res.status(400).json({ 
         success: false, 
         error: 'Channel name is required' 
       });
     }
-
-    // 🔑 Agora Configuration (เพิ่มใน .env ของคุณ)
-    const AGORA_APP_ID = process.env.AGORA_APP_ID || "5c57b43b4d544f51be764b8672ac06bf";
-    const AGORA_APP_CERTIFICATE = process.env.AGORA_APP_CERTIFICATE;
-
-    if (!AGORA_APP_CERTIFICATE) {
-      console.error('❌ Agora certificate not configured');
-      return res.status(500).json({ 
-        success: false, 
-        error: 'Agora service not configured' 
-      });
-    }
-
-    // ต้องติดตั้ง package ก่อน: npm install agora-token
-    const { RtcTokenBuilder, RtcRole } = require('agora-token');
-
-    // คำนวณ expiration time (1 ชั่วโมง)
-    const expirationTimeInSeconds = 3600;
-    const currentTimestamp = Math.floor(Date.now() / 1000);
-    const privilegeExpiredTs = currentTimestamp + expirationTimeInSeconds;
-
-    // สร้าง token
-    const token = RtcTokenBuilder.buildTokenWithUid(
-      AGORA_APP_ID,
-      AGORA_APP_CERTIFICATE,
-      channelName,
-      uid,
-      RtcRole.PUBLISHER,
-      privilegeExpiredTs
-    );
-
-    console.log('✅ Agora token generated successfully for channel:', channelName);
-
-    res.json({
-      success: true,
-      token: token,
-      channelName: channelName,
-      uid: uid,
-      expiresIn: expirationTimeInSeconds,
-      appId: AGORA_APP_ID
-    });
 
   } catch (error) {
     console.error('❌ Agora token generation error:', error);
