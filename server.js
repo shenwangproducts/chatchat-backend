@@ -39,6 +39,10 @@ app.use(express.json({ limit: '10mb' }));
 mongoose.connect(process.env.MONGO_URL || process.env.MONGODB_URI || 'mongodb://localhost:27017/connect_app', {
   useNewUrlParser: true,
   useUnifiedTopology: true,
+  ssl: true,
+  tlsAllowInvalidCertificates: false,
+  retryWrites: true,
+  w: 'majority'
 });
 
 const db = mongoose.connection;
