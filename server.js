@@ -2352,7 +2352,7 @@ const startServer = async () => {
     console.log('🚀 =================================');
     console.log('📡 Connect API Server Started!');
     console.log(`📍 Port: ${PORT}`);
-    console.log(`🗄️  Database: ${process.env.MONGODB_URI || 'mongodb://mongo:27017/connect_app'}`);
+    console.log(`🗄️  Database: Connected successfully`);
     console.log(`🌐 Environment: ${process.env.NODE_ENV || 'development'}`);
     console.log('🚀 =================================');
     console.log('🎯 Enhanced Security Features:');
