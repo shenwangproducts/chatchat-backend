@@ -212,11 +212,47 @@ const mourningSettingsSchema = new mongoose.Schema({
 
 const MourningSettings = mongoose.model('MourningSettings', mourningSettingsSchema);
 
-// 🔐 Encryption Utilities
-const generateSalt = () => bcrypt.genSaltSync(12);
-const hashPassword = (password, salt) => bcrypt.hashSync(password + salt, 12);
-const verifyPassword = (password, hash, salt) => bcrypt.compareSync(password + salt, hash);
-const generateAuthToken = (userId) => jwt.sign({ userId }, JWT_SECRET, { expiresIn: '30d' });
+// 🔐 Recovery ID System
+const recoveryIdSchema = new mongoose.Schema({
+  userId: { 
+    type: mongoose.Schema.Types.ObjectId, 
+    ref: 'User', 
+    required: true 
+  },
+  recoveryId: { 
+    type: String, 
+    required: true, 
+    unique: true 
+  },
+  securityQuestion: { type: String, required: true },
+  securityAnswer: { type: String, required: true },
+  isActive: { type: Boolean, default: true },
+  createdAt: { type: Date, default: Date.now },
+  updatedAt: { type: Date, default: Date.now }
+});
+
+recoveryIdSchema.index({ userId: 1 });
+recoveryIdSchema.index({ recoveryId: 1 });
+
+const RecoveryId = mongoose.model('RecoveryId', recoveryIdSchema);
+
+// 🔧 Generate Unique Recovery ID
+const generateRecoveryId = () => {
+  const timestamp = Date.now().toString(36);
+  const random = Math.random().toString(36).substr(2, 5);
+  return `REC${timestamp}${random}`.toUpperCase();
+};
+
+// 📧 Send Recovery Email (Optional - สำหรับส่งรหัสยืนยัน)
+const sendRecoveryEmail = async (email, recoveryId, securityQuestion) => {
+  // ใช้ email service ของคุณที่นี่
+  console.log('📧 Recovery ID Created:', {
+    email: email,
+    recoveryId: recoveryId,
+    securityQuestion: securityQuestion
+  });
+  return true;
+};
 
 // 🔒 Auth Middleware
 const authenticateToken = async (req, res, next) => {
@@ -297,7 +333,6 @@ const createAdminUser = async () => {
     console.error('❌ Error creating admin user:', error);
   }
 };
-
 
 const createOfficialChat = async (userId) => {
   try {
@@ -394,6 +429,12 @@ const initializeMourningSettings = async () => {
   }
 };
 
+// 🔐 Encryption Utilities
+const generateSalt = () => bcrypt.genSaltSync(12);
+const hashPassword = (password, salt) => bcrypt.hashSync(password + salt, 12);
+const verifyPassword = (password, hash, salt) => bcrypt.compareSync(password + salt, hash);
+const generateAuthToken = (userId) => jwt.sign({ userId }, JWT_SECRET, { expiresIn: '30d' });
+
 // ✅ Input Validation Middleware
 const validateRegistration = [
   body('username')
@@ -434,7 +475,16 @@ app.get('/', (req, res) => {
       mourning: '/api/mourning',
       register: '/api/register',
       login: '/api/login',
+      logout: '/api/logout',
       profile: '/api/profile',
+      recovery: {
+        create: '/api/recovery/create',
+        info: '/api/recovery/info',
+        update: '/api/recovery/update',
+        delete: '/api/recovery/delete',
+        account: '/api/recovery/account',
+        verify: '/api/recovery/verify'
+      },
       chats: {
         list: '/api/chats',
         create: '/api/chats (POST)',
@@ -468,7 +518,7 @@ app.get('/', (req, res) => {
       admin: {
         officialChatsStatus: '/api/admin/official-chats-status',
         cleanDuplicateChats: '/api/admin/clean-duplicate-official-chats',
-        forceCleanDuplicates: '/api/admin/force-clean-duplicates' // 🔥 ใหม่
+        forceCleanDuplicates: '/api/admin/force-clean-duplicates'
       }
     }
   });
@@ -1611,6 +1661,32 @@ app.post('/api/login', validateLogin, async (req, res) => {
   }
 });
 
+// 🚪 User Logout (Protected)
+app.post('/api/logout', authenticateToken, async (req, res) => {
+  try {
+    console.log('🚪 User logout:', req.user._id);
+
+    // ลบ token จากผู้ใช้
+    req.user.authToken = null;
+    req.user.tokenExpiry = null;
+    await req.user.save();
+
+    console.log('✅ User logged out successfully');
+
+    res.json({
+      success: true,
+      message: 'Logged out successfully'
+    });
+
+  } catch (error) {
+    console.error('❌ Logout error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Logout failed'
+    });
+  }
+});
+
 // 👤 Get User Profile (Protected)
 app.get('/api/profile', authenticateToken, async (req, res) => {
   try {
@@ -2647,6 +2723,387 @@ app.delete('/api/admin/force-clean-duplicates', authenticateToken, async (req, r
   }
 });
 
+// =============================================
+// 🔐 RECOVERY ID API ROUTES
+// =============================================
+
+// 🔑 Create Recovery ID (Protected)
+app.post('/api/recovery/create', authenticateToken, [
+  body('securityQuestion')
+    .isLength({ min: 5, max: 200 })
+    .withMessage('Security question must be between 5-200 characters'),
+  body('securityAnswer')
+    .isLength({ min: 2, max: 100 })
+    .withMessage('Security answer must be between 2-100 characters')
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({
+        success: false,
+        error: errors.array()[0].msg
+      });
+    }
+
+    const { securityQuestion, securityAnswer } = req.body;
+    const userId = req.user._id;
+
+    console.log('🔑 Creating recovery ID for user:', userId);
+
+    // ตรวจสอบว่ามี Recovery ID อยู่แล้วหรือไม่
+    const existingRecovery = await RecoveryId.findOne({ 
+      userId: userId, 
+      isActive: true 
+    });
+
+    if (existingRecovery) {
+      return res.status(400).json({
+        success: false,
+        error: 'Recovery ID already exists for this account'
+      });
+    }
+
+    // สร้าง Recovery ID ใหม่
+    const recoveryId = generateRecoveryId();
+    const hashedAnswer = hashPassword(securityAnswer.toLowerCase().trim(), req.user.passwordSalt);
+
+    const newRecovery = new RecoveryId({
+      userId: userId,
+      recoveryId: recoveryId,
+      securityQuestion: securityQuestion.trim(),
+      securityAnswer: hashedAnswer,
+      isActive: true
+    });
+
+    await newRecovery.save();
+
+    // ส่งอีเมลแจ้งเตือน (ถ้ามีการตั้งค่า)
+    await sendRecoveryEmail(req.user.email, recoveryId, securityQuestion);
+
+    console.log('✅ Recovery ID created successfully:', recoveryId);
+
+    res.json({
+      success: true,
+      message: 'Recovery ID created successfully',
+      recoveryId: recoveryId,
+      securityQuestion: securityQuestion
+    });
+
+  } catch (error) {
+    console.error('❌ Create recovery ID error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to create recovery ID'
+    });
+  }
+});
+
+// 🔍 Get Recovery ID Info (Protected)
+app.get('/api/recovery/info', authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user._id;
+
+    console.log('🔍 Getting recovery info for user:', userId);
+
+    const recoveryInfo = await RecoveryId.findOne({ 
+      userId: userId, 
+      isActive: true 
+    }).select('recoveryId securityQuestion createdAt');
+
+    if (recoveryInfo) {
+      res.json({
+        success: true,
+        hasRecoveryId: true,
+        recoveryId: recoveryInfo.recoveryId,
+        securityQuestion: recoveryInfo.securityQuestion,
+        createdAt: recoveryInfo.createdAt
+      });
+    } else {
+      res.json({
+        success: true,
+        hasRecoveryId: false,
+        message: 'No recovery ID set up for this account'
+      });
+    }
+
+  } catch (error) {
+    console.error('❌ Get recovery info error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to get recovery info'
+    });
+  }
+});
+
+// 🔄 Update Recovery ID (Protected)
+app.put('/api/recovery/update', authenticateToken, [
+  body('currentAnswer')
+    .notEmpty()
+    .withMessage('Current security answer is required'),
+  body('newSecurityQuestion')
+    .isLength({ min: 5, max: 200 })
+    .withMessage('New security question must be between 5-200 characters'),
+  body('newSecurityAnswer')
+    .isLength({ min: 2, max: 100 })
+    .withMessage('New security answer must be between 2-100 characters')
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({
+        success: false,
+        error: errors.array()[0].msg
+      });
+    }
+
+    const { currentAnswer, newSecurityQuestion, newSecurityAnswer } = req.body;
+    const userId = req.user._id;
+
+    console.log('🔄 Updating recovery ID for user:', userId);
+
+    const recoveryInfo = await RecoveryId.findOne({ 
+      userId: userId, 
+      isActive: true 
+    });
+
+    if (!recoveryInfo) {
+      return res.status(404).json({
+        success: false,
+        error: 'Recovery ID not found'
+      });
+    }
+
+    // ตรวจสอบคำตอบปัจจุบัน
+    const isCurrentAnswerValid = verifyPassword(
+      currentAnswer.toLowerCase().trim(), 
+      recoveryInfo.securityAnswer, 
+      req.user.passwordSalt
+    );
+
+    if (!isCurrentAnswerValid) {
+      return res.status(400).json({
+        success: false,
+        error: 'Current security answer is incorrect'
+      });
+    }
+
+    // อัพเดทข้อมูล
+    recoveryInfo.securityQuestion = newSecurityQuestion.trim();
+    recoveryInfo.securityAnswer = hashPassword(newSecurityAnswer.toLowerCase().trim(), req.user.passwordSalt);
+    recoveryInfo.updatedAt = new Date();
+
+    await recoveryInfo.save();
+
+    console.log('✅ Recovery ID updated successfully');
+
+    res.json({
+      success: true,
+      message: 'Recovery ID updated successfully',
+      recoveryId: recoveryInfo.recoveryId,
+      securityQuestion: newSecurityQuestion
+    });
+
+  } catch (error) {
+    console.error('❌ Update recovery ID error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to update recovery ID'
+    });
+  }
+});
+
+// 🗑️ Delete Recovery ID (Protected)
+app.delete('/api/recovery/delete', authenticateToken, [
+  body('securityAnswer')
+    .notEmpty()
+    .withMessage('Security answer is required')
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({
+        success: false,
+        error: errors.array()[0].msg
+      });
+    }
+
+    const { securityAnswer } = req.body;
+    const userId = req.user._id;
+
+    console.log('🗑️ Deleting recovery ID for user:', userId);
+
+    const recoveryInfo = await RecoveryId.findOne({ 
+      userId: userId, 
+      isActive: true 
+    });
+
+    if (!recoveryInfo) {
+      return res.status(404).json({
+        success: false,
+        error: 'Recovery ID not found'
+      });
+    }
+
+    // ตรวจสอบคำตอบ
+    const isAnswerValid = verifyPassword(
+      securityAnswer.toLowerCase().trim(), 
+      recoveryInfo.securityAnswer, 
+      req.user.passwordSalt
+    );
+
+    if (!isAnswerValid) {
+      return res.status(400).json({
+        success: false,
+        error: 'Security answer is incorrect'
+      });
+    }
+
+    // ลบ Recovery ID (soft delete)
+    recoveryInfo.isActive = false;
+    recoveryInfo.updatedAt = new Date();
+
+    await recoveryInfo.save();
+
+    console.log('✅ Recovery ID deleted successfully');
+
+    res.json({
+      success: true,
+      message: 'Recovery ID deleted successfully'
+    });
+
+  } catch (error) {
+    console.error('❌ Delete recovery ID error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to delete recovery ID'
+    });
+  }
+});
+
+// 🔓 Recover Account with Recovery ID
+app.post('/api/recovery/account', [
+  body('recoveryId')
+    .notEmpty()
+    .withMessage('Recovery ID is required'),
+  body('securityAnswer')
+    .notEmpty()
+    .withMessage('Security answer is required'),
+  body('newPassword')
+    .isLength({ min: 6 })
+    .withMessage('New password must be at least 6 characters')
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({
+        success: false,
+        error: errors.array()[0].msg
+      });
+    }
+
+    const { recoveryId, securityAnswer, newPassword } = req.body;
+
+    console.log('🔓 Account recovery attempt with ID:', recoveryId);
+
+    const recoveryInfo = await RecoveryId.findOne({ 
+      recoveryId: recoveryId.toUpperCase().trim(),
+      isActive: true 
+    }).populate('userId');
+
+    if (!recoveryInfo || !recoveryInfo.userId) {
+      return res.status(404).json({
+        success: false,
+        error: 'Invalid recovery ID or account not found'
+      });
+    }
+
+    const user = recoveryInfo.userId;
+
+    // ตรวจสอบคำตอบ
+    const isAnswerValid = verifyPassword(
+      securityAnswer.toLowerCase().trim(), 
+      recoveryInfo.securityAnswer, 
+      user.passwordSalt
+    );
+
+    if (!isAnswerValid) {
+      return res.status(400).json({
+        success: false,
+        error: 'Security answer is incorrect'
+      });
+    }
+
+    // อัพเดทรหัสผ่านใหม่
+    user.passwordHash = hashPassword(newPassword, user.passwordSalt);
+    user.updatedAt = new Date();
+
+    await user.save();
+
+    console.log('✅ Account recovered successfully for user:', user._id);
+
+    res.json({
+      success: true,
+      message: 'Password reset successfully. You can now login with your new password.',
+      username: user.username,
+      email: user.email
+    });
+
+  } catch (error) {
+    console.error('❌ Account recovery error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to recover account'
+    });
+  }
+});
+
+// 🔍 Verify Recovery ID (สำหรับตรวจสอบก่อนกู้คืน)
+app.post('/api/recovery/verify', [
+  body('recoveryId')
+    .notEmpty()
+    .withMessage('Recovery ID is required')
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({
+        success: false,
+        error: errors.array()[0].msg
+      });
+    }
+
+    const { recoveryId } = req.body;
+
+    console.log('🔍 Verifying recovery ID:', recoveryId);
+
+    const recoveryInfo = await RecoveryId.findOne({ 
+      recoveryId: recoveryId.toUpperCase().trim(),
+      isActive: true 
+    }).populate('userId', 'username email');
+
+    if (!recoveryInfo || !recoveryInfo.userId) {
+      return res.status(404).json({
+        success: false,
+        error: 'Invalid recovery ID'
+      });
+    }
+
+    // ส่งเฉพาะคำถามเพื่อความปลอดภัย
+    res.json({
+      success: true,
+      securityQuestion: recoveryInfo.securityQuestion,
+      userHint: recoveryInfo.userId.username // หรือ email ถ้าต้องการ
+    });
+
+  } catch (error) {
+    console.error('❌ Verify recovery ID error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to verify recovery ID'
+    });
+  }
+});
+
 // 🏥 Health Check
 app.get('/api/health', (req, res) => {
   res.json({
@@ -2695,6 +3152,7 @@ const startServer = async () => {
     console.log('   • 🚫 Account Lockout Protection');
     console.log('   • 📧 Email Format Validation');
     console.log('   • 🗃️ Database Indexing for Performance');
+    console.log('   • 🔐 Recovery ID System');
     console.log('🔥 OFFICIAL CHAT POLICY: 1 USER = 1 OFFICIAL CHAT');
     console.log('🚀 =================================');
   });
