@@ -55,7 +55,7 @@ db.once('open', () => {
   createAdminUser();
 });
 
-// User Schema
+// User Schema - ✅ อัพเดทแล้ว
 const userSchema = new mongoose.Schema({
   username: { 
     type: String, 
@@ -70,6 +70,11 @@ const userSchema = new mongoose.Schema({
     trim: true, 
     lowercase: true,
     index: true 
+  },
+  phone: { 
+    type: String, 
+    trim: true,
+    sparse: true // ✅ เพิ่ม field phone
   },
   passwordHash: { type: String, required: true },
   passwordSalt: { type: String, required: true },
@@ -87,13 +92,17 @@ const userSchema = new mongoose.Schema({
   updatedAt: { type: Date, default: Date.now },
   lastLogin: Date,
   failedLoginAttempts: { type: Number, default: 0 },
-  isActive: { type: Boolean, default: true }
+  isActive: { type: Boolean, default: true },
+  // ✅ เพิ่ม fields ใหม่สำหรับ PDPA
+  pdpaConsent: { type: Boolean, default: false },
+  consentTimestamp: Date
 });
 
 // ✅ Add indexes for better performance
 userSchema.index({ email: 1 });
 userSchema.index({ userId: 1 });
 userSchema.index({ createdAt: -1 });
+userSchema.index({ phone: 1 }); // ✅ เพิ่ม index สำหรับ phone
 
 const User = mongoose.model('User', userSchema);
 
@@ -435,7 +444,7 @@ const hashPassword = (password, salt) => bcrypt.hashSync(password + salt, 12);
 const verifyPassword = (password, hash, salt) => bcrypt.compareSync(password + salt, hash);
 const generateAuthToken = (userId) => jwt.sign({ userId }, JWT_SECRET, { expiresIn: '30d' });
 
-// ✅ Input Validation Middleware
+// ✅ Input Validation Middleware - ✅ อัพเดทแล้ว
 const validateRegistration = [
   body('username')
     .isLength({ min: 3, max: 30 })
@@ -448,7 +457,18 @@ const validateRegistration = [
     .normalizeEmail(),
   body('password')
     .isLength({ min: 6 })
-    .withMessage('Password must be at least 6 characters')
+    .withMessage('Password must be at least 6 characters'),
+  body('phone')
+    .optional()
+    .isLength({ min: 10, max: 15 })
+    .withMessage('Phone number must be between 10-15 characters')
+    .matches(/^[0-9]+$/)
+    .withMessage('Phone number must contain only numbers'),
+  body('pdpa_consent')
+    .isBoolean()
+    .withMessage('PDPA consent must be a boolean value')
+    .equals('true')
+    .withMessage('PDPA consent is required for registration')
 ];
 
 const validateLogin = [
@@ -829,11 +849,12 @@ app.get('/api/users/search', authenticateToken, async (req, res) => {
       $or: [
         { username: { $regex: searchTerm, $options: 'i' } },
         { email: { $regex: searchTerm, $options: 'i' } },
-        { userId: { $regex: searchTerm, $options: 'i' } }
+        { userId: { $regex: searchTerm, $options: 'i' } },
+        { phone: { $regex: searchTerm, $options: 'i' } } // ✅ เพิ่มการค้นหาด้วยเบอร์โทร
       ],
       isActive: true
     })
-    .select('username email userId profilePicture userType lastLogin createdAt')
+    .select('username email userId profilePicture userType lastLogin createdAt phone') // ✅ เพิ่ม phone
     .limit(20);
 
     console.log('✅ Found', users.length, 'users for query:', searchTerm);
@@ -842,6 +863,7 @@ app.get('/api/users/search', authenticateToken, async (req, res) => {
       id: user.userId || user._id.toString(),
       name: user.username,
       email: user.email,
+      phone: user.phone, // ✅ เพิ่มเบอร์โทรในผลลัพธ์
       avatar: user.profilePicture || '👤',
       isOnline: user.lastLogin && (Date.now() - user.lastLogin.getTime() < 5 * 60 * 1000),
       mutualFriends: 0,
@@ -995,7 +1017,7 @@ app.get('/api/users/:userId', authenticateToken, async (req, res) => {
       ],
       isActive: true
     })
-    .select('username email userId profilePicture userType lastLogin createdAt');
+    .select('username email userId profilePicture userType lastLogin createdAt phone'); // ✅ เพิ่ม phone
 
     if (!user) {
       return res.status(404).json({
@@ -1008,6 +1030,7 @@ app.get('/api/users/:userId', authenticateToken, async (req, res) => {
       id: user.userId || user._id.toString(),
       name: user.username,
       email: user.email,
+      phone: user.phone, // ✅ เพิ่มเบอร์โทร
       avatar: user.profilePicture || '👤',
       isOnline: user.lastLogin && (Date.now() - user.lastLogin.getTime() < 5 * 60 * 1000),
       mutualFriends: 0,
@@ -1042,7 +1065,7 @@ app.get('/api/friends/requests', authenticateToken, async (req, res) => {
       toUser: req.user._id,
       status: 'pending'
     })
-    .populate('fromUser', 'username email userId profilePicture userType lastLogin')
+    .populate('fromUser', 'username email userId profilePicture userType lastLogin phone') // ✅ เพิ่ม phone
     .sort({ createdAt: -1 });
 
     const formattedRequests = friendRequests.map(request => ({
@@ -1051,6 +1074,7 @@ app.get('/api/friends/requests', authenticateToken, async (req, res) => {
         id: request.fromUser.userId || request.fromUser._id.toString(),
         name: request.fromUser.username,
         email: request.fromUser.email,
+        phone: request.fromUser.phone, // ✅ เพิ่มเบอร์โทร
         avatar: request.fromUser.profilePicture || '👤',
         isOnline: request.fromUser.lastLogin && (Date.now() - request.fromUser.lastLogin.getTime() < 5 * 60 * 1000),
         userType: request.fromUser.userType
@@ -1087,8 +1111,8 @@ app.get('/api/friends', authenticateToken, async (req, res) => {
         { toUser: req.user._id, status: 'accepted' }
       ]
     })
-    .populate('fromUser', 'username email userId profilePicture userType lastLogin createdAt')
-    .populate('toUser', 'username email userId profilePicture userType lastLogin createdAt')
+    .populate('fromUser', 'username email userId profilePicture userType lastLogin createdAt phone') // ✅ เพิ่ม phone
+    .populate('toUser', 'username email userId profilePicture userType lastLogin createdAt phone') // ✅ เพิ่ม phone
     .sort({ updatedAt: -1 });
 
     const friends = friendRequests.map(request => {
@@ -1099,6 +1123,7 @@ app.get('/api/friends', authenticateToken, async (req, res) => {
         id: friendUser.userId || friendUser._id.toString(),
         name: friendUser.username,
         email: friendUser.email,
+        phone: friendUser.phone, // ✅ เพิ่มเบอร์โทร
         avatar: friendUser.profilePicture || '👤',
         isOnline: friendUser.lastLogin && (Date.now() - friendUser.lastLogin.getTime() < 5 * 60 * 1000),
         userType: friendUser.userType,
@@ -1136,8 +1161,8 @@ app.post('/api/friends/requests/:requestId/accept', authenticateToken, async (re
       toUser: req.user._id,
       status: 'pending'
     })
-    .populate('fromUser', 'username email userId')
-    .populate('toUser', 'username email userId');
+    .populate('fromUser', 'username email userId phone') // ✅ เพิ่ม phone
+    .populate('toUser', 'username email userId phone'); // ✅ เพิ่ม phone
 
     if (!friendRequest) {
       return res.status(404).json({
@@ -1158,7 +1183,8 @@ app.post('/api/friends/requests/:requestId/accept', authenticateToken, async (re
       friend: {
         id: friendRequest.fromUser.userId || friendRequest.fromUser._id.toString(),
         name: friendRequest.fromUser.username,
-        email: friendRequest.fromUser.email
+        email: friendRequest.fromUser.email,
+        phone: friendRequest.fromUser.phone // ✅ เพิ่มเบอร์โทร
       },
       requestId: friendRequest._id
     });
@@ -1184,7 +1210,7 @@ app.post('/api/friends/requests/:requestId/reject', authenticateToken, async (re
       toUser: req.user._id,
       status: 'pending'
     })
-    .populate('fromUser', 'username email userId');
+    .populate('fromUser', 'username email userId phone'); // ✅ เพิ่ม phone
 
     if (!friendRequest) {
       return res.status(404).json({
@@ -1256,7 +1282,8 @@ app.delete('/api/friends/:friendId', authenticateToken, async (req, res) => {
       message: 'Friend removed successfully',
       removedFriend: {
         id: friendUser.userId || friendUser._id.toString(),
-        name: friendUser.username
+        name: friendUser.username,
+        phone: friendUser.phone // ✅ เพิ่มเบอร์โทร
       }
     });
 
@@ -1313,7 +1340,8 @@ app.get('/api/friends/status/:targetUserId', authenticateToken, async (req, res)
       requestId: requestId,
       targetUser: {
         id: targetUser.userId || targetUser._id.toString(),
-        name: targetUser.username
+        name: targetUser.username,
+        phone: targetUser.phone // ✅ เพิ่มเบอร์โทร
       }
     });
 
@@ -1506,7 +1534,7 @@ app.put('/api/settings', async (req, res) => {
   }
 });
 
-// 👤 User Registration (✅ Enhanced Security)
+// 👤 User Registration (✅ Enhanced Security with PDPA) - ✅ อัพเดทแล้ว
 app.post('/api/register', validateRegistration, async (req, res) => {
   try {
     const errors = validationResult(req);
@@ -1517,9 +1545,32 @@ app.post('/api/register', validateRegistration, async (req, res) => {
       });
     }
 
-    const { username, email, password, language = 'en', theme = 'white' } = req.body;
+    const { 
+      username, 
+      email, 
+      password, 
+      phone,           // ✅ เพิ่ม field ใหม่
+      language = 'en', 
+      theme = 'white',
+      pdpa_consent,    // ✅ เพิ่ม field ใหม่
+      consent_timestamp // ✅ เพิ่ม field ใหม่
+    } = req.body;
 
-    console.log('👤 User registration attempt:', { username, email });
+    console.log('👤 User registration attempt:', { 
+      username, 
+      email, 
+      phone,
+      pdpa_consent,
+      consent_timestamp 
+    });
+
+    // ✅ ตรวจสอบ PDPA Consent
+    if (!pdpa_consent) {
+      return res.status(400).json({
+        success: false,
+        error: 'PDPA consent is required for registration'
+      });
+    }
 
     const existingUser = await User.findOne({ email });
     if (!existingUser) {
@@ -1530,6 +1581,7 @@ app.post('/api/register', validateRegistration, async (req, res) => {
       const newUser = new User({
         username: username.trim(),
         email: email.trim().toLowerCase(),
+        phone: phone ? phone.trim() : '', // ✅ บันทึกเบอร์โทร
         passwordHash,
         passwordSalt: salt,
         authToken,
@@ -1537,7 +1589,10 @@ app.post('/api/register', validateRegistration, async (req, res) => {
         settings: { 
           language: language,
           theme: theme
-        }
+        },
+        // ✅ บันทึกข้อมูล PDPA
+        pdpaConsent: pdpa_consent,
+        consentTimestamp: consent_timestamp || new Date().toISOString()
       });
 
       await newUser.save();
@@ -1545,7 +1600,7 @@ app.post('/api/register', validateRegistration, async (req, res) => {
       // 🔥 สร้างแชททางการ (1 user ต่อ 1 แชททางการเท่านั้น)
       await createOfficialChat(newUser._id);
 
-      console.log('✅ User registered successfully:', newUser._id);
+      console.log('✅ User registered successfully with PDPA consent:', newUser._id);
 
       res.status(201).json({
         success: true,
@@ -1554,7 +1609,10 @@ app.post('/api/register', validateRegistration, async (req, res) => {
           id: newUser._id,
           username: newUser.username,
           email: newUser.email,
-          settings: newUser.settings
+          phone: newUser.phone, // ✅ ส่งกลับเบอร์โทร
+          settings: newUser.settings,
+          pdpaConsent: newUser.pdpaConsent, // ✅ ส่งกลับสถานะยินยอม
+          consentTimestamp: newUser.consentTimestamp // ✅ ส่งกลับเวลายินยอม
         },
         authToken
       });
@@ -1569,7 +1627,7 @@ app.post('/api/register', validateRegistration, async (req, res) => {
     console.error('❌ Registration error:', error);
     res.status(500).json({
       success: false,
-      error: 'Registration failed'
+      error: 'Registration failed: ' + error.message
     });
   }
 });
@@ -1629,9 +1687,11 @@ app.post('/api/login', validateLogin, async (req, res) => {
             id: user._id,
             username: user.username,
             email: user.email,
+            phone: user.phone, // ✅ ส่งกลับเบอร์โทร
             settings: user.settings,
             profilePicture: user.profilePicture,
-            userId: user.userId
+            userId: user.userId,
+            pdpaConsent: user.pdpaConsent // ✅ ส่งกลับสถานะยินยอม
           },
           authToken
         });
@@ -1689,7 +1749,7 @@ app.post('/api/logout', authenticateToken, async (req, res) => {
   }
 });
 
-// 👤 Get User Profile (Protected)
+// 👤 Get User Profile (Protected) - ✅ อัพเดทแล้ว
 app.get('/api/profile', authenticateToken, async (req, res) => {
   try {
     console.log('📋 Profile request for user:', req.user._id);
@@ -1700,10 +1760,13 @@ app.get('/api/profile', authenticateToken, async (req, res) => {
         id: req.user._id,
         username: req.user.username,
         email: req.user.email,
+        phone: req.user.phone, // ✅ เพิ่มเบอร์โทร
         settings: req.user.settings,
         profilePicture: req.user.profilePicture,
         userId: req.user.userId,
-        lastLogin: req.user.lastLogin
+        lastLogin: req.user.lastLogin,
+        pdpaConsent: req.user.pdpaConsent, // ✅ เพิ่มสถานะยินยอม
+        consentTimestamp: req.user.consentTimestamp // ✅ เพิ่มเวลายินยอม
       }
     });
   } catch (error) {
@@ -1715,13 +1778,19 @@ app.get('/api/profile', authenticateToken, async (req, res) => {
   }
 });
 
-// 👤 Update User Profile (Protected)
+// 👤 Update User Profile (Protected) - ✅ อัพเดทแล้ว
 app.put('/api/profile', authenticateToken, [
   body('username')
     .isLength({ min: 3, max: 30 })
     .withMessage('Username must be between 3-30 characters')
     .trim()
-    .escape()
+    .escape(),
+  body('phone')
+    .optional()
+    .isLength({ min: 10, max: 15 })
+    .withMessage('Phone number must be between 10-15 characters')
+    .matches(/^[0-9]+$/)
+    .withMessage('Phone number must contain only numbers')
 ], async (req, res) => {
   try {
     const errors = validationResult(req);
@@ -1732,7 +1801,7 @@ app.put('/api/profile', authenticateToken, [
       });
     }
 
-    const { username, profilePicture } = req.body;
+    const { username, profilePicture, phone } = req.body;
 
     console.log('👤 Updating profile for user:', req.user._id);
 
@@ -1748,6 +1817,10 @@ app.put('/api/profile', authenticateToken, [
         if (profilePicture) {
           req.user.profilePicture = profilePicture;
         }
+
+        if (phone) {
+          req.user.phone = phone.trim(); // ✅ อัพเดทเบอร์โทร
+        }
         
         req.user.updatedAt = new Date();
 
@@ -1762,6 +1835,7 @@ app.put('/api/profile', authenticateToken, [
             id: req.user._id,
             username: req.user.username,
             email: req.user.email,
+            phone: req.user.phone, // ✅ ส่งกลับเบอร์โทร
             profilePicture: req.user.profilePicture,
             settings: req.user.settings
           }
@@ -1775,9 +1849,14 @@ app.put('/api/profile', authenticateToken, [
     } else {
       if (profilePicture) {
         req.user.profilePicture = profilePicture;
-        req.user.updatedAt = new Date();
-        await req.user.save();
       }
+
+      if (phone) {
+        req.user.phone = phone.trim(); // ✅ อัพเดทเบอร์โทร
+      }
+
+      req.user.updatedAt = new Date();
+      await req.user.save();
 
       console.log('✅ Profile updated successfully');
 
@@ -1788,6 +1867,7 @@ app.put('/api/profile', authenticateToken, [
           id: req.user._id,
           username: req.user.username,
           email: req.user.email,
+          phone: req.user.phone, // ✅ ส่งกลับเบอร์โทร
           profilePicture: req.user.profilePicture,
           settings: req.user.settings
         }
@@ -2073,7 +2153,7 @@ app.get('/api/chats', authenticateToken, async (req, res) => {
       participants: req.user._id,
       isActive: true
     })
-    .populate('participants', 'username email userType profilePicture userId')
+    .populate('participants', 'username email userType profilePicture userId phone') // ✅ เพิ่ม phone
     .sort({ lastMessageTime: -1 });
 
     // 🔥 กรองแชททางการให้เหลือแค่ 1 อันเท่านั้น
@@ -2110,7 +2190,8 @@ app.get('/api/chats', authenticateToken, async (req, res) => {
         chatType: chat.chatType,
         isOfficial: chat.chatType === 'official',
         profilePicture: otherParticipant?.profilePicture || null,
-        contactId: otherParticipant?.userId || otherParticipant?._id.toString()
+        contactId: otherParticipant?.userId || otherParticipant?._id.toString(),
+        phone: otherParticipant?.phone || null // ✅ เพิ่มเบอร์โทร
       };
     });
 
@@ -2147,7 +2228,7 @@ app.get('/api/chats/:chatId/messages', authenticateToken, async (req, res) => {
         chatId,
         isDeleted: false
       })
-        .populate('senderId', 'username userType profilePicture userId')
+        .populate('senderId', 'username userType profilePicture userId phone') // ✅ เพิ่ม phone
         .sort({ timestamp: 1 });
 
       const formattedMessages = messages.map(msg => {
@@ -2164,7 +2245,8 @@ app.get('/api/chats/:chatId/messages', authenticateToken, async (req, res) => {
           messageType: msg.messageType,
           isDeleted: false,
           profilePicture: msg.senderId.profilePicture,
-          senderId: msg.senderId.userId || msg.senderId._id.toString()
+          senderId: msg.senderId.userId || msg.senderId._id.toString(),
+          phone: msg.senderId.phone // ✅ เพิ่มเบอร์โทร
         };
       });
 
@@ -2239,7 +2321,8 @@ app.post('/api/chats/:chatId/messages', authenticateToken, async (req, res) => {
           isMe: true,
           isSystem: false,
           messageType,
-          profilePicture: req.user.profilePicture
+          profilePicture: req.user.profilePicture,
+          phone: req.user.phone // ✅ เพิ่มเบอร์โทร
         }
       });
     } else {
@@ -2493,7 +2576,7 @@ app.get('/api/admin/official-chats-status', authenticateToken, async (req, res) 
       chatType: 'official',
       'participants': systemUser._id
     })
-    .populate('participants', 'username email userType')
+    .populate('participants', 'username email userType phone') // ✅ เพิ่ม phone
     .sort({ createdAt: 1 });
 
     const userChatCount = {};
@@ -3224,6 +3307,10 @@ const startServer = async () => {
     console.log('   • 🗃️ Database Indexing for Performance');
     console.log('   • 🔐 Recovery ID System');
     console.log('🔥 OFFICIAL CHAT POLICY: 1 USER = 1 OFFICIAL CHAT');
+    console.log('📱 NEW FEATURES:');
+    console.log('   • 📞 Phone Number Support');
+    console.log('   • 📋 PDPA Consent Tracking');
+    console.log('   • 🔐 Enhanced Data Privacy');
     console.log('🚀 =================================');
   });
 };
