@@ -3104,6 +3104,74 @@ app.post('/api/recovery/verify', [
   }
 });
 
+// 🔍 Verify Security Answer (สำหรับขั้นตอนที่ 2 ในกระบวนการกู้คืน)
+app.post('/api/recovery/verify-answer', [
+  body('recoveryId')
+    .notEmpty()
+    .withMessage('Recovery ID is required'),
+  body('securityAnswer')
+    .notEmpty()
+    .withMessage('Security answer is required')
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({
+        success: false,
+        error: errors.array()[0].msg
+      });
+    }
+
+    const { recoveryId, securityAnswer } = req.body;
+
+    console.log('🔍 Verifying security answer for recovery ID:', recoveryId);
+
+    const recoveryInfo = await RecoveryId.findOne({ 
+      recoveryId: recoveryId.toUpperCase().trim(),
+      isActive: true 
+    }).populate('userId');
+
+    if (!recoveryInfo || !recoveryInfo.userId) {
+      return res.status(404).json({
+        success: false,
+        error: 'Invalid recovery ID'
+      });
+    }
+
+    const user = recoveryInfo.userId;
+
+    // ตรวจสอบคำตอบ
+    const isAnswerValid = verifyPassword(
+      securityAnswer.toLowerCase().trim(), 
+      recoveryInfo.securityAnswer, 
+      user.passwordSalt
+    );
+
+    if (!isAnswerValid) {
+      return res.status(400).json({
+        success: false,
+        error: 'Security answer is incorrect'
+      });
+    }
+
+    console.log('✅ Security answer verified successfully for user:', user._id);
+
+    res.json({
+      success: true,
+      message: 'Security answer verified successfully',
+      verified: true,
+      username: user.username
+    });
+
+  } catch (error) {
+    console.error('❌ Verify security answer error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to verify security answer'
+    });
+  }
+});
+
 // 🏥 Health Check
 app.get('/api/health', (req, res) => {
   res.json({
