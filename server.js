@@ -483,7 +483,9 @@ app.get('/', (req, res) => {
         update: '/api/recovery/update',
         delete: '/api/recovery/delete',
         account: '/api/recovery/account',
-        verify: '/api/recovery/verify'
+        verify: '/api/recovery/verify',
+        verifyAnswer: '/api/recovery/verify-answer'
+
       },
       chats: {
         list: '/api/chats',
