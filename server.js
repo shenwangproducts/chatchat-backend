@@ -163,13 +163,13 @@ transactionSchema.index({ referenceId: 1 });
 
 const Transaction = mongoose.model('Transaction', transactionSchema);
 
-// Identity Verification Schema
+// Identity Verification Schema - IMPROVED VERSION
 const identityVerificationSchema = new mongoose.Schema({
   userId: { 
     type: mongoose.Schema.Types.ObjectId, 
     ref: 'User', 
     required: true,
-    unique: true
+    index: true
   },
   verificationMethod: { 
     type: String, 
@@ -179,21 +179,41 @@ const identityVerificationSchema = new mongoose.Schema({
   status: { 
     type: String, 
     enum: ['pending', 'verified', 'rejected', 'expired'],
-    default: 'pending'
+    default: 'pending',
+    index: true
   },
-  documentNumber: { type: String, required: true },
-  fullName: { type: String, required: true },
-  birthDate: { type: Date },
-  nationality: { type: String },
-  expiryDate: { type: Date },
+  documentNumber: { 
+    type: String, 
+    required: true,
+    trim: true
+  },
+  fullName: { 
+    type: String, 
+    required: true,
+    trim: true
+  },
+  birthDate: { 
+    type: Date 
+  },
+  nationality: { 
+    type: String,
+    trim: true
+  },
+  expiryDate: { 
+    type: Date 
+  },
   faceScanData: {
     stepsCompleted: { type: Number, default: 0 },
     totalSteps: { type: Number, default: 6 },
     scanResults: [{
-      step: Number,
-      title: String,
-      status: { type: String, enum: ['pending', 'completed', 'failed'] },
-      timestamp: Date
+      step: { type: Number, required: true },
+      title: { type: String, required: true },
+      status: { 
+        type: String, 
+        enum: ['pending', 'completed', 'failed'],
+        default: 'pending'
+      },
+      timestamp: { type: Date, default: Date.now }
     }],
     completedAt: Date
   },
@@ -204,8 +224,8 @@ const identityVerificationSchema = new mongoose.Schema({
   updatedAt: { type: Date, default: Date.now }
 });
 
-identityVerificationSchema.index({ userId: 1 });
-identityVerificationSchema.index({ status: 1 });
+// ✅ เพิ่ม compound index เพื่อป้องกันการยืนยันซ้ำ
+identityVerificationSchema.index({ userId: 1, status: 1 });
 
 const IdentityVerification = mongoose.model('IdentityVerification', identityVerificationSchema);
 
@@ -967,17 +987,33 @@ app.post('/api/wallet/add-coins', authenticateToken, [
   }
 });
 
-// 🆔 Start Identity Verification
+// 🆔 Start Identity Verification - FIXED VERSION
 app.post('/api/identity/verify', authenticateToken, [
   body('verificationMethod')
     .isIn(['id_card', 'passport'])
     .withMessage('Verification method must be id_card or passport'),
   body('documentNumber')
     .notEmpty()
-    .withMessage('Document number is required'),
+    .withMessage('Document number is required')
+    .isLength({ min: 1, max: 50 })
+    .withMessage('Document number must be between 1-50 characters'),
   body('fullName')
     .notEmpty()
     .withMessage('Full name is required')
+    .isLength({ min: 2, max: 100 })
+    .withMessage('Full name must be between 2-100 characters'),
+  body('birthDate')
+    .optional()
+    .matches(/^\d{1,2}\/\d{1,2}\/\d{4}$/)
+    .withMessage('Birth date must be in format DD/MM/YYYY'),
+  body('nationality')
+    .optional()
+    .isLength({ min: 2, max: 50 })
+    .withMessage('Nationality must be between 2-50 characters'),
+  body('expiryDate')
+    .optional()
+    .matches(/^\d{1,2}\/\d{1,2}\/\d{4}$/)
+    .withMessage('Expiry date must be in format DD/MM/YYYY')
 ], async (req, res) => {
   try {
     const errors = validationResult(req);
@@ -997,39 +1033,95 @@ app.post('/api/identity/verify', authenticateToken, [
       expiryDate 
     } = req.body;
 
-    console.log('🆔 Starting identity verification for user:', req.user._id);
+    console.log('🆔 Starting identity verification for user:', req.user._id, {
+      verificationMethod,
+      documentNumber: documentNumber ? `${documentNumber.substring(0, 5)}...` : 'empty',
+      fullName: fullName ? `${fullName.substring(0, 10)}...` : 'empty',
+      birthDate,
+      nationality,
+      expiryDate
+    });
 
+    // ✅ ตรวจสอบว่าผู้ใช้มีการยืนยันตัวตนที่กำลังดำเนินการหรือเสร็จสิ้นแล้ว
     const existingVerification = await IdentityVerification.findOne({ 
       userId: req.user._id,
       status: { $in: ['pending', 'verified'] }
     });
 
     if (existingVerification) {
+      console.log('⚠️ Identity verification already exists:', existingVerification.status);
       return res.status(400).json({
         success: false,
         error: 'Identity verification already in progress or completed'
       });
     }
 
+    // ✅ เตรียมข้อมูลการยืนยันตัวตน
     const verificationData = {
       userId: req.user._id,
       verificationMethod,
-      documentNumber,
-      fullName,
-      status: 'pending'
+      documentNumber: documentNumber.trim(),
+      fullName: fullName.trim(),
+      status: 'pending',
+      faceScanData: {
+        stepsCompleted: 0,
+        totalSteps: 6,
+        scanResults: [],
+        completedAt: null
+      }
     };
 
-    if (verificationMethod === 'id_card' && birthDate) {
-      verificationData.birthDate = new Date(birthDate);
+    // ✅ เพิ่มข้อมูลเพิ่มเติมตามประเภทการยืนยัน
+    if (verificationMethod === 'id_card') {
+      if (birthDate) {
+        try {
+          // แปลงรูปแบบวันที่จาก DD/MM/YYYY เป็น ISO
+          const [day, month, year] = birthDate.split('/');
+          if (day && month && year) {
+            const isoDate = new Date(`${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`);
+            verificationData.birthDate = isoDate;
+            console.log('✅ Converted birth date:', birthDate, '->', isoDate);
+          }
+        } catch (dateError) {
+          console.warn('⚠️ Invalid birth date format, skipping:', birthDate);
+        }
+      }
     } else if (verificationMethod === 'passport') {
-      if (nationality) verificationData.nationality = nationality;
-      if (expiryDate) verificationData.expiryDate = new Date(expiryDate);
+      if (nationality) {
+        verificationData.nationality = nationality.trim();
+      }
+      if (expiryDate) {
+        try {
+          const [day, month, year] = expiryDate.split('/');
+          if (day && month && year) {
+            const isoDate = new Date(`${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`);
+            verificationData.expiryDate = isoDate;
+            console.log('✅ Converted expiry date:', expiryDate, '->', isoDate);
+          }
+        } catch (dateError) {
+          console.warn('⚠️ Invalid expiry date format, skipping:', expiryDate);
+        }
+      }
     }
 
+    console.log('📝 Creating identity verification with data:', {
+      verificationMethod: verificationData.verificationMethod,
+      hasDocumentNumber: !!verificationData.documentNumber,
+      hasFullName: !!verificationData.fullName,
+      hasBirthDate: !!verificationData.birthDate,
+      hasNationality: !!verificationData.nationality,
+      hasExpiryDate: !!verificationData.expiryDate
+    });
+
+    // ✅ สร้างการยืนยันตัวตนใหม่
     const identityVerification = new IdentityVerification(verificationData);
     await identityVerification.save();
 
-    console.log('✅ Identity verification started:', identityVerification._id);
+    console.log('✅ Identity verification started successfully:', {
+      verificationId: identityVerification._id,
+      userId: req.user._id,
+      method: verificationMethod
+    });
 
     res.json({
       success: true,
@@ -1040,9 +1132,19 @@ app.post('/api/identity/verify', authenticateToken, [
 
   } catch (error) {
     console.error('❌ Start identity verification error:', error);
+    
+    // ✅ ให้ข้อมูล error ที่ละเอียดมากขึ้น
+    let errorMessage = 'Failed to start identity verification';
+    if (error.name === 'ValidationError') {
+      errorMessage = `Data validation error: ${Object.values(error.errors).map(e => e.message).join(', ')}`;
+    } else if (error.code === 11000) {
+      errorMessage = 'Identity verification already exists for this user';
+    }
+
     res.status(500).json({
       success: false,
-      error: 'Failed to start identity verification'
+      error: errorMessage,
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
 });
