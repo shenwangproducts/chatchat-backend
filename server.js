@@ -530,6 +530,21 @@ const initializeBankServices = async () => {
           withdraw: 'baac://account/withdraw'
         },
         packageName: 'com.baac.bank'
+      },
+      {
+        code: 'bank_f',
+        name: 'บริการธนาคาร F',
+        nameEn: 'Bank Service F',
+        nameZh: '银行服务F',
+        color: '#795548',
+        icon: 'account_balance',
+        deeplink: {
+          scan_pay: 'ktb://app/main',
+          transfer: 'ktb://app/transfer',
+          topup: 'ktb://app/topup',
+          withdraw: 'ktb://app/withdraw'
+        },
+        packageName: 'ktbcs.netbank'
       }
     ];
 
