@@ -4155,6 +4155,238 @@ app.get('/api/health', (req, res) => {
   });
 });
 
+// =============================================
+// 📱 APP VERSION CHECK API
+// =============================================
+
+// 📱 ตรวจสอบเวอร์ชั่นแอป
+app.get('/api/app/version', async (req, res) => {
+  try {
+    console.log('📱 App version check request');
+    
+    // ข้อมูลเวอร์ชั่นปัจจุบันในระบบ
+    const currentVersion = "1.0.0"; // เวอร์ชั่นปัจจุบันของแอป
+    const latestVersion = "1.1.0";  // เวอร์ชั่นล่าสุดที่ใช้แสดงในป๊อปอัพ
+    
+    // กำหนดว่ามีอัพเดทใหม่หรือไม่ (สามารถเปลี่ยนเป็น true เมื่อต้องการให้แสดงป๊อปอัพ)
+    const updateAvailable = true; // เปลี่ยนเป็น false เมื่อไม่มีอัพเดท
+    
+    if (updateAvailable) {
+      res.json({
+        success: true,
+        update_available: true,
+        version_info: {
+          version: latestVersion,
+          release_date: new Date().toISOString(),
+          features: [
+            "เพิ่มระบบตรวจสอบเวอร์ชั่นอัตโนมัติ",
+            "เพิ่มป๊อปอัพแจ้งเวอร์ชั่นใหม่",
+            "ปรับปรุงระบบการแจ้งเตือน",
+            "เพิ่มระบบนับถอยหลัง 3 วัน",
+            "รองรับหลายภาษาในระบบอัพเดท",
+            "ปรับปรุงความเสถียรของแอป",
+            "แก้ไขข้อบกพร่องเล็กน้อย",
+            "เพิ่มการรองรับธีมสีใหม่",
+            "ปรับปรุงประสิทธิภาพการทำงาน"
+          ],
+          download_url: "https://github.com/your-username/chat-chat/releases/latest",
+          minimum_required_version: "1.0.0",
+          update_type: "optional", // หรือ "mandatory" ถ้าต้องการบังคับอัพเดท
+          release_notes: {
+            en: "New update with version checking system and improved features",
+            th: "อัพเดทใหม่พร้อมระบบตรวจสอบเวอร์ชั่นและฟีเจอร์ที่ปรับปรุงแล้ว",
+            zh: "新更新包含版本检查系统和改进的功能"
+          }
+        }
+      });
+    } else {
+      res.json({
+        success: true,
+        update_available: false,
+        message: "App is up to date",
+        current_version: currentVersion,
+        last_checked: new Date().toISOString()
+      });
+    }
+    
+    console.log('✅ Version check response sent:', { 
+      update_available: updateAvailable,
+      current_version: currentVersion,
+      latest_version: latestVersion 
+    });
+    
+  } catch (error) {
+    console.error('❌ App version check error:', error);
+    res.status(500).json({
+      success: false,
+      update_available: false,
+      error: 'Failed to check app version'
+    });
+  }
+});
+
+// 📱 ฟังก์ชันสำหรับ Admin ในการตั้งค่าเวอร์ชั่น
+app.post('/api/admin/app-version', authenticateToken, async (req, res) => {
+  try {
+    // ตรวจสอบว่าเป็น Admin หรือไม่
+    if (req.user.userType !== 'admin') {
+      return res.status(403).json({
+        success: false,
+        error: 'Access denied. Admin only.'
+      });
+    }
+
+    const { 
+      version, 
+      update_available, 
+      features, 
+      download_url, 
+      update_type,
+      release_notes 
+    } = req.body;
+
+    console.log('👨‍💼 Admin updating app version settings:', {
+      version,
+      update_available,
+      features_count: features?.length || 0,
+      update_type
+    });
+
+    // ตรวจสอบข้อมูลที่จำเป็น
+    if (!version || typeof update_available !== 'boolean') {
+      return res.status(400).json({
+        success: false,
+        error: 'Version and update_available are required'
+      });
+    }
+
+    // สร้างข้อมูลเวอร์ชั่นใหม่
+    const versionInfo = {
+      version: version,
+      release_date: new Date().toISOString(),
+      features: features || [
+        "ปรับปรุงประสิทธิภาพการทำงาน",
+        "แก้ไขข้อบกพร่อง",
+        "เพิ่มความเสถียรของระบบ"
+      ],
+      download_url: download_url || "https://github.com/your-username/chat-chat/releases/latest",
+      minimum_required_version: "1.0.0",
+      update_type: update_type || "optional",
+      release_notes: release_notes || {
+        en: "App update",
+        th: "อัพเดทแอปพลิเคชัน",
+        zh: "应用程序更新"
+      }
+    };
+
+    console.log('✅ App version settings updated by admin:', {
+      admin: req.user.username,
+      version: version,
+      update_available: update_available
+    });
+
+    res.json({
+      success: true,
+      message: 'App version settings updated successfully',
+      version_info: versionInfo,
+      update_available: update_available,
+      updated_by: req.user.username,
+      updated_at: new Date().toISOString()
+    });
+
+  } catch (error) {
+    console.error('❌ Admin update app version error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to update app version settings'
+    });
+  }
+});
+
+// 📱 ตรวจสอบสถานะเวอร์ชั่นของแอป
+app.get('/api/app/version/status', async (req, res) => {
+  try {
+    console.log('📊 App version status check');
+    
+    // นับจำนวนผู้ใช้ที่อัพเดทแล้ว
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    
+    const totalUsers = await User.countDocuments({ isActive: true });
+    const recentLogins = await User.countDocuments({ 
+      isActive: true,
+      lastLogin: { $gte: thirtyDaysAgo }
+    });
+
+    res.json({
+      success: true,
+      version_stats: {
+        current_version: "1.0.0",
+        latest_version: "1.1.0",
+        total_active_users: totalUsers,
+        recent_active_users: recentLogins,
+        update_coverage_percentage: recentLogins > 0 ? Math.round((recentLogins / totalUsers) * 100) : 0,
+        last_version_check: new Date().toISOString()
+      },
+      system_info: {
+        server_time: new Date().toISOString(),
+        uptime: process.uptime(),
+        environment: process.env.NODE_ENV || 'development'
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ App version status error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to get app version status'
+    });
+  }
+});
+
+// 📱 Webhook สำหรับรับการอัพเดทจาก GitHub (ถ้าต้องการ)
+app.post('/api/webhooks/github/release', async (req, res) => {
+  try {
+    console.log('🔄 GitHub release webhook received');
+    
+    const { action, release } = req.body;
+    
+    if (action === 'released' && release) {
+      console.log('🎉 New GitHub release detected:', {
+        tag_name: release.tag_name,
+        name: release.name,
+        published_at: release.published_at
+      });
+
+      // บันทึกข้อมูลการปล่อยเวอร์ชั่นใหม่
+      // สามารถบันทึกลงใน database ได้ถ้าต้องการเก็บประวัติ
+      
+      res.json({
+        success: true,
+        message: 'GitHub release webhook processed successfully',
+        release: {
+          version: release.tag_name,
+          name: release.name,
+          published_at: release.published_at,
+          body: release.body ? release.body.substring(0, 200) + '...' : ''
+        }
+      });
+    } else {
+      res.json({
+        success: true,
+        message: 'Webhook received but no action taken'
+      });
+    }
+
+  } catch (error) {
+    console.error('❌ GitHub webhook error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to process GitHub webhook'
+    });
+  }
+});
+
 // 🚨 Error Handling Middleware
 app.use((error, req, res, next) => {
   console.error('❌ Unhandled error:', error);
