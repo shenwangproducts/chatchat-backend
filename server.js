@@ -98,7 +98,8 @@ const userSchema = new mongoose.Schema({
   failedLoginAttempts: { type: Number, default: 0 },
   isActive: { type: Boolean, default: true },
   pdpaConsent: { type: Boolean, default: false },
-  consentTimestamp: Date
+  consentTimestamp: Date,
+  fcmToken: { type: String } // สำหรับ Push Notifications
 });
 
 userSchema.index({ email: 1 });
@@ -413,6 +414,553 @@ recoveryIdSchema.index({ userId: 1 });
 recoveryIdSchema.index({ recoveryId: 1 });
 
 const RecoveryId = mongoose.model('RecoveryId', recoveryIdSchema);
+
+// =============================================
+// 📨 NOTIFICATION SYSTEM
+// =============================================
+
+// Notification Schema
+const notificationSchema = new mongoose.Schema({
+  userId: { 
+    type: mongoose.Schema.Types.ObjectId, 
+    ref: 'User', 
+    required: true,
+    index: true 
+  },
+  type: { 
+    type: String, 
+    enum: [
+      'wallet_transaction',    // ธุรกรรมกระเป๋าเงิน
+      'wallet_points',         // คะแนนคอยน์
+      'chat_message',          // ข้อความใหม่
+      'chat_call',             // การโทรเข้า
+      'friend_request',        // คำขอเป็นเพื่อน
+      'friend_accept',         // ยอมรับเพื่อน
+      'profile_visit',         // มีคนเยี่ยมชมโปรไฟล์
+      'profile_update',        // อัปเดตโปรไฟล์
+      'bank_service',          // ใช้บริการธนาคาร
+      'identity_verify',       // ยืนยันตัวตนสำเร็จ
+      'system_alert',          // แจ้งเตือนระบบ
+      'reward_earned'          // ได้รับรางวัล
+    ],
+    required: true,
+    index: true
+  },
+  title: { 
+    type: String, 
+    required: true 
+  },
+  message: { 
+    type: String, 
+    required: true 
+  },
+  icon: { 
+    type: String, 
+    default: '🔔'
+  },
+  color: { 
+    type: String, 
+    default: '#1FAE4B'
+  },
+  data: { 
+    type: Map, 
+    of: mongoose.Schema.Types.Mixed,
+    default: {}
+  },
+  isRead: { 
+    type: Boolean, 
+    default: false,
+    index: true 
+  },
+  isArchived: { 
+    type: Boolean, 
+    default: false 
+  },
+  priority: { 
+    type: String, 
+    enum: ['low', 'medium', 'high', 'urgent'],
+    default: 'medium'
+  },
+  expiresAt: { 
+    type: Date,
+    index: true,
+    expires: 30 * 24 * 60 * 60 // 30 วัน
+  },
+  createdAt: { 
+    type: Date, 
+    default: Date.now,
+    index: true 
+  },
+  readAt: { 
+    type: Date 
+  },
+  sourceId: { 
+    type: String 
+  }
+});
+
+// ✅ Indexes สำหรับประสิทธิภาพ
+notificationSchema.index({ userId: 1, isRead: 1, createdAt: -1 });
+notificationSchema.index({ userId: 1, type: 1, createdAt: -1 });
+notificationSchema.index({ sourceId: 1 });
+notificationSchema.index({ userId: 1, isArchived: 1 });
+
+const Notification = mongoose.model('Notification', notificationSchema);
+
+// ✅ ฟังก์ชันสร้างการแจ้งเตือน
+const createNotification = async ({
+  userId,
+  type,
+  title,
+  message,
+  icon = '🔔',
+  color = '#1FAE4B',
+  data = {},
+  priority = 'medium',
+  sourceId = null
+}) => {
+  try {
+    console.log('📨 Creating notification:', { userId, type, title });
+
+    const notification = new Notification({
+      userId,
+      type,
+      title,
+      message,
+      icon,
+      color,
+      data,
+      priority,
+      sourceId,
+      expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000) // 30 วัน
+    });
+
+    await notification.save();
+    
+    // ✅ ส่ง Push Notification (ถ้ามี Firebase setup)
+    await sendPushNotification(userId, {
+      title,
+      body: message,
+      data: {
+        type,
+        ...data,
+        notificationId: notification._id.toString()
+      }
+    });
+
+    console.log('✅ Notification created:', notification._id);
+    return notification;
+
+  } catch (error) {
+    console.error('❌ Error creating notification:', error);
+    throw error;
+  }
+};
+
+// ✅ ฟังก์ชันส่ง Push Notification
+const sendPushNotification = async (userId, payload) => {
+  try {
+    // TODO: ตั้งค่า Firebase Cloud Messaging (FCM) ตรงนี้
+    // ตัวอย่างโครงสร้าง:
+    // const user = await User.findById(userId);
+    // if (user && user.fcmToken) {
+    //   await admin.messaging().send({
+    //     token: user.fcmToken,
+    //     notification: {
+    //       title: payload.title,
+    //       body: payload.body
+    //     },
+    //     data: payload.data
+    //   });
+    // }
+    
+    console.log('📤 Push notification prepared for user:', userId);
+    return true;
+  } catch (error) {
+    console.error('❌ Error sending push notification:', error);
+    return false;
+  }
+};
+
+// =============================================
+// 🏦 WALLET NOTIFICATIONS
+// =============================================
+
+// 💰 สร้างการแจ้งเตือนธุรกรรมกระเป๋าเงิน
+const createWalletTransactionNotification = async (userId, transactionData) => {
+  const { bankName, serviceType, amount, time, referenceId } = transactionData;
+  
+  let title, message, icon, color;
+  
+  switch (serviceType) {
+    case 'scan_pay':
+      title = 'แสกนจ่าย';
+      message = `${bankName} เวลา ${time}`;
+      icon = '💰';
+      color = '#4CAF50'; // สีเขียว
+      break;
+    case 'transfer':
+      title = 'โอนเงิน';
+      message = `${bankName} จำนวน ${amount} THB`;
+      icon = '💸';
+      color = '#2196F3'; // สีฟ้า
+      break;
+    case 'topup':
+      title = 'เติมเงิน';
+      message = `${bankName} จำนวน ${amount} THB`;
+      icon = '📈';
+      color = '#FF9800'; // สีส้ม
+      break;
+    case 'withdraw':
+      title = 'ถอนเงิน';
+      message = `${bankName} จำนวน ${amount} THB`;
+      icon = '🏧';
+      color = '#9C27B0'; // สีม่วง
+      break;
+    default:
+      title = 'ธุรกรรมกระเป๋าเงิน';
+      message = `${bankName} - ${serviceType}`;
+      icon = '💳';
+      color = '#607D8B'; // สีเทา
+  }
+
+  return await createNotification({
+    userId,
+    type: 'wallet_transaction',
+    title,
+    message,
+    icon,
+    color,
+    data: {
+      bankName,
+      serviceType,
+      amount,
+      time,
+      referenceId,
+      timestamp: new Date().toISOString()
+    },
+    priority: 'high',
+    sourceId: `wallet_${referenceId}`
+  });
+};
+
+// 🎯 สร้างการแจ้งเตือนคะแนนคอยน์
+const createCoinPointsNotification = async (userId, pointsData) => {
+  const { points, description, balanceAfter, type } = pointsData;
+  
+  let title, message, icon;
+  
+  if (type === 'earn') {
+    title = 'ได้รับคะแนนคอยน์';
+    message = `+${points} คะแนน (${description})`;
+    icon = '⭐';
+  } else if (type === 'redeem') {
+    title = 'ใช้คะแนนคอยน์';
+    message = `-${points} คะแนน (${description})`;
+    icon = '🎁';
+  } else {
+    title = 'คะแนนคอยน์';
+    message = `${description}`;
+    icon = '🪙';
+  }
+
+  return await createNotification({
+    userId,
+    type: 'wallet_points',
+    title,
+    message,
+    icon,
+    color: type === 'earn' ? '#FFC107' : '#E91E63',
+    data: {
+      points,
+      description,
+      balanceAfter,
+      type,
+      timestamp: new Date().toISOString()
+    },
+    priority: 'medium',
+    sourceId: `points_${Date.now()}`
+  });
+};
+
+// =============================================
+// 💬 CHAT NOTIFICATIONS
+// =============================================
+
+// 💬 สร้างการแจ้งเตือนข้อความใหม่
+const createChatMessageNotification = async (userId, chatData) => {
+  const { senderName, message, chatId, messageType } = chatData;
+  
+  let icon = '💬';
+  let title = 'ข้อความใหม่';
+  
+  if (messageType === 'image') {
+    icon = '🖼️';
+    title = 'รูปภาพใหม่';
+  } else if (messageType === 'voice') {
+    icon = '🎤';
+    title = 'ข้อความเสียง';
+  } else if (messageType === 'video') {
+    icon = '🎥';
+    title = 'วิดีโอใหม่';
+  }
+
+  return await createNotification({
+    userId,
+    type: 'chat_message',
+    title: `${senderName}: ${title}`,
+    message: messageType === 'text' ? message : `ส่ง${title.toLowerCase()}`,
+    icon,
+    color: '#1FAE4B', // สีเขียว Connect
+    data: {
+      senderName,
+      message,
+      chatId,
+      messageType,
+      timestamp: new Date().toISOString()
+    },
+    priority: 'urgent',
+    sourceId: `chat_${chatId}_${Date.now()}`
+  });
+};
+
+// 📞 สร้างการแจ้งเตือนการโทรเข้า
+const createCallNotification = async (userId, callData) => {
+  const { callerName, callType, callId } = callData;
+  
+  const title = callType === 'video' ? 'วิดีโอคอลล์เข้า' : 'โทรศัพท์เข้า';
+  const icon = callType === 'video' ? '🎥' : '📞';
+
+  return await createNotification({
+    userId,
+    type: 'chat_call',
+    title: `${callerName}: ${title}`,
+    message: callType === 'video' ? 'วิดีโอคอลล์...' : 'กำลังโทร...',
+    icon,
+    color: '#FF5722', // สีส้ม
+    data: {
+      callerName,
+      callType,
+      callId,
+      timestamp: new Date().toISOString()
+    },
+    priority: 'urgent',
+    sourceId: `call_${callId}`
+  });
+};
+
+// =============================================
+// 👥 FRIEND NOTIFICATIONS
+// =============================================
+
+// 👥 สร้างการแจ้งเตือนคำขอเป็นเพื่อน
+const createFriendRequestNotification = async (userId, friendData) => {
+  const { requesterName, requesterId } = friendData;
+
+  return await createNotification({
+    userId,
+    type: 'friend_request',
+    title: 'คำขอเป็นเพื่อน',
+    message: `${requesterName} ส่งคำขอเป็นเพื่อน`,
+    icon: '👤',
+    color: '#3F51B5', // สีน้ำเงิน
+    data: {
+      requesterName,
+      requesterId,
+      timestamp: new Date().toISOString()
+    },
+    priority: 'high',
+    sourceId: `friend_request_${requesterId}`
+  });
+};
+
+// 🤝 สร้างการแจ้งเตือนยอมรับเพื่อน
+const createFriendAcceptNotification = async (userId, friendData) => {
+  const { friendName, friendId } = friendData;
+
+  return await createNotification({
+    userId,
+    type: 'friend_accept',
+    title: 'ยอมรับคำขอเป็นเพื่อน',
+    message: `${friendName} ยอมรับคำขอเป็นเพื่อนแล้ว`,
+    icon: '🤝',
+    color: '#4CAF50', // สีเขียว
+    data: {
+      friendName,
+      friendId,
+      timestamp: new Date().toISOString()
+    },
+    priority: 'medium',
+    sourceId: `friend_accept_${friendId}`
+  });
+};
+
+// =============================================
+// 👤 PROFILE NOTIFICATIONS
+// =============================================
+
+// 👁️ สร้างการแจ้งเตือนคนเยี่ยมชมโปรไฟล์
+const createProfileVisitNotification = async (userId, visitorData) => {
+  const { visitorName, visitorId } = visitorData;
+
+  return await createNotification({
+    userId,
+    type: 'profile_visit',
+    title: 'มีคนเยี่ยมชมโปรไฟล์',
+    message: `${visitorName} เยี่ยมชมโปรไฟล์ของคุณ`,
+    icon: '👁️',
+    color: '#9C27B0', // สีม่วง
+    data: {
+      visitorName,
+      visitorId,
+      timestamp: new Date().toISOString()
+    },
+    priority: 'low',
+    sourceId: `profile_visit_${visitorId}_${Date.now()}`
+  });
+};
+
+// ✏️ สร้างการแจ้งเตือนอัปเดตโปรไฟล์
+const createProfileUpdateNotification = async (userId, updateData) => {
+  const { field, oldValue, newValue } = updateData;
+
+  return await createNotification({
+    userId,
+    type: 'profile_update',
+    title: 'อัปเดตโปรไฟล์สำเร็จ',
+    message: `${field} ถูกเปลี่ยนจาก "${oldValue}" เป็น "${newValue}"`,
+    icon: '✏️',
+    color: '#FF9800', // สีส้ม
+    data: {
+      field,
+      oldValue,
+      newValue,
+      timestamp: new Date().toISOString()
+    },
+    priority: 'low',
+    sourceId: `profile_update_${Date.now()}`
+  });
+};
+
+// =============================================
+// 🏦 BANK SERVICE NOTIFICATIONS
+// =============================================
+
+// 🏦 สร้างการแจ้งเตือนใช้บริการธนาคาร
+const createBankServiceNotification = async (userId, bankData) => {
+  const { bankName, serviceType, deeplinkUrl } = bankData;
+
+  const serviceNames = {
+    'scan_pay': 'แสกนจ่าย',
+    'transfer': 'โอนเงิน',
+    'topup': 'เติมเงิน',
+    'withdraw': 'ถอนเงินสด'
+  };
+
+  const serviceName = serviceNames[serviceType] || 'บริการธนาคาร';
+
+  return await createNotification({
+    userId,
+    type: 'bank_service',
+    title: 'เริ่มใช้บริการธนาคาร',
+    message: `${bankName} - ${serviceName}`,
+    icon: '🏦',
+    color: '#2196F3', // สีฟ้า
+    data: {
+      bankName,
+      serviceType,
+      serviceName,
+      deeplinkUrl,
+      timestamp: new Date().toISOString()
+    },
+    priority: 'high',
+    sourceId: `bank_${bankName}_${Date.now()}`
+  });
+};
+
+// =============================================
+// 🆔 IDENTITY VERIFICATION NOTIFICATIONS
+// =============================================
+
+// ✅ สร้างการแจ้งเตือนยืนยันตัวตนสำเร็จ
+const createIdentityVerificationNotification = async (userId, verificationData) => {
+  const { method, rewardPoints } = verificationData;
+
+  const methodNames = {
+    'id_card': 'บัตรประชาชน',
+    'passport': 'พาสปอร์ต'
+  };
+
+  const methodName = methodNames[method] || 'ยืนยันตัวตน';
+
+  return await createNotification({
+    userId,
+    type: 'identity_verify',
+    title: 'ยืนยันตัวตนสำเร็จ! 🎉',
+    message: `ยืนยันตัวตนด้วย${methodName} สำเร็จ ได้รับ ${rewardPoints} คะแนน`,
+    icon: '✅',
+    color: '#4CAF50', // สีเขียว
+    data: {
+      method,
+      methodName,
+      rewardPoints,
+      timestamp: new Date().toISOString()
+    },
+    priority: 'high',
+    sourceId: `identity_verify_${userId}`
+  });
+};
+
+// =============================================
+// 🎁 REWARD NOTIFICATIONS
+// =============================================
+
+// 🎁 สร้างการแจ้งเตือนได้รับรางวัล
+const createRewardNotification = async (userId, rewardData) => {
+  const { rewardName, points, description } = rewardData;
+
+  return await createNotification({
+    userId,
+    type: 'reward_earned',
+    title: 'ได้รับรางวัล! 🎁',
+    message: `${rewardName} - ${description}`,
+    icon: '🎁',
+    color: '#FFC107', // สีเหลือง
+    data: {
+      rewardName,
+      points,
+      description,
+      timestamp: new Date().toISOString()
+    },
+    priority: 'medium',
+    sourceId: `reward_${Date.now()}`
+  });
+};
+
+// =============================================
+// 🚨 SYSTEM ALERT NOTIFICATIONS
+// =============================================
+
+// ⚡ สร้างการแจ้งเตือนระบบ
+const createSystemNotification = async (userId, systemData) => {
+  const { alertType, message, actionUrl } = systemData;
+
+  return await createNotification({
+    userId,
+    type: 'system_alert',
+    title: 'แจ้งเตือนระบบ',
+    message,
+    icon: '⚡',
+    color: '#FF5722', // สีแดงส้ม
+    data: {
+      alertType,
+      actionUrl,
+      timestamp: new Date().toISOString()
+    },
+    priority: alertType === 'critical' ? 'urgent' : 'high',
+    sourceId: `system_${Date.now()}`
+  });
+};
 
 // =============================================
 // 🔧 UTILITY FUNCTIONS
@@ -979,6 +1527,14 @@ app.post('/api/wallet/add-coins', authenticateToken, [
     });
     await reward.save();
 
+    // ✅ เพิ่มการแจ้งเตือนคะแนนคอยน์
+    await createCoinPointsNotification(req.user._id, {
+      points: points,
+      description: description,
+      balanceAfter: wallet.coinPoints,
+      type: 'earn'
+    });
+
     console.log('✅ Coin points added successfully:', {
       userId: req.user._id,
       pointsAdded: points,
@@ -1244,6 +1800,12 @@ app.post('/api/identity/face-scan/:verificationId', authenticateToken, [
           referenceId: `VERIFY_${verificationId}`
         });
         await reward.save();
+
+        // ✅ สร้างการแจ้งเตือนยืนยันตัวตนสำเร็จ
+        await createIdentityVerificationNotification(req.user._id, {
+          method: identityVerification.verificationMethod,
+          rewardPoints: rewardPoints
+        });
       }
     }
 
@@ -1418,6 +1980,13 @@ app.post('/api/bank/launch', authenticateToken, [
       }
     });
     await transaction.save();
+
+    // ✅ เพิ่มการแจ้งเตือนใช้บริการธนาคาร
+    await createBankServiceNotification(req.user._id, {
+      bankName: bankService.name,
+      serviceType: serviceType,
+      deeplinkUrl: deeplinkUrl
+    });
 
     console.log('✅ Bank service launched successfully:', {
       bankCode,
@@ -1726,6 +2295,13 @@ app.put('/api/profile', authenticateToken, [
 
         await req.user.save();
 
+        // ✅ สร้างการแจ้งเตือนอัปเดตโปรไฟล์
+        await createProfileUpdateNotification(req.user._id, {
+          field: 'username',
+          oldValue: req.user.username,
+          newValue: username
+        });
+
         console.log('✅ Profile updated successfully');
 
         res.json({
@@ -1749,10 +2325,24 @@ app.put('/api/profile', authenticateToken, [
     } else {
       if (profilePicture) {
         req.user.profilePicture = profilePicture;
+        
+        // ✅ สร้างการแจ้งเตือนอัปเดตโปรไฟล์
+        await createProfileUpdateNotification(req.user._id, {
+          field: 'profilePicture',
+          oldValue: 'รูปเก่า',
+          newValue: 'รูปใหม่'
+        });
       }
 
       if (phone) {
         req.user.phone = phone.trim();
+        
+        // ✅ สร้างการแจ้งเตือนอัปเดตโปรไฟล์
+        await createProfileUpdateNotification(req.user._id, {
+          field: 'phone',
+          oldValue: req.user.phone || 'ไม่ได้ตั้งค่า',
+          newValue: phone
+        });
       }
 
       req.user.updatedAt = new Date();
@@ -2389,6 +2979,18 @@ app.post('/api/chats', authenticateToken, async (req, res) => {
 
       await welcomeMessage.save();
 
+      // ✅ สร้างการแจ้งเตือนข้อความใหม่สำหรับผู้ใช้คนอื่น
+      users.forEach(async (user) => {
+        if (user._id.toString() !== userId.toString()) {
+          await createChatMessageNotification(user._id, {
+            senderName: req.user.username,
+            message: 'เริ่มการสนทนา',
+            chatId: newChat._id,
+            messageType: 'text'
+          });
+        }
+      });
+
       res.json({
         success: true,
         chat: {
@@ -2646,6 +3248,12 @@ app.post('/api/friends/request', authenticateToken, async (req, res) => {
     await friendRequest.save();
     console.log('✅ Friend request saved successfully:', friendRequest._id);
 
+    // ✅ สร้างการแจ้งเตือนคำขอเป็นเพื่อน
+    await createFriendRequestNotification(targetUser._id, {
+      requesterName: req.user.username,
+      requesterId: req.user.userId
+    });
+
     res.json({
       success: true,
       message: 'Friend request sent successfully',
@@ -2838,6 +3446,12 @@ app.post('/api/friends/requests/:requestId/accept', authenticateToken, async (re
     await friendRequest.save();
 
     console.log('✅ Friend request accepted successfully');
+
+    // ✅ สร้างการแจ้งเตือนยอมรับเพื่อน
+    await createFriendAcceptNotification(friendRequest.fromUser, {
+      friendName: req.user.username,
+      friendId: req.user.userId
+    });
 
     res.json({
       success: true,
@@ -3179,6 +3793,21 @@ app.post('/api/chats/:chatId/messages', authenticateToken, async (req, res) => {
 
       await chat.save();
 
+      // ✅ สร้างการแจ้งเตือนข้อความใหม่สำหรับผู้ใช้คนอื่น
+      chat.participants.forEach(async (participantId) => {
+        if (participantId.toString() !== req.user._id.toString()) {
+          const otherUser = await User.findById(participantId);
+          if (otherUser) {
+            await createChatMessageNotification(participantId, {
+              senderName: req.user.username,
+              message: content,
+              chatId: chatId,
+              messageType: messageType
+            });
+          }
+        }
+      });
+
       console.log('✅ Message sent successfully');
 
       res.json({
@@ -3352,6 +3981,347 @@ app.put('/api/chats/:chatId/messages/:messageId', authenticateToken, async (req,
     res.status(500).json({
       success: false,
       error: 'Failed to update message'
+    });
+  }
+});
+
+// =============================================
+// 📨 NOTIFICATION API ROUTES
+// =============================================
+
+// 📱 Get User Notifications
+app.get('/api/notifications', authenticateToken, async (req, res) => {
+  try {
+    const { 
+      page = 1, 
+      limit = 20,
+      type,
+      unreadOnly = false,
+      archived = false
+    } = req.query;
+    
+    const skip = (page - 1) * limit;
+
+    console.log('📨 Fetching notifications for user:', req.user._id, {
+      page, limit, type, unreadOnly
+    });
+
+    const query = {
+      userId: req.user._id,
+      isArchived: archived === 'true'
+    };
+
+    if (type) {
+      query.type = type;
+    }
+
+    if (unreadOnly === 'true') {
+      query.isRead = false;
+    }
+
+    const notifications = await Notification.find(query)
+      .sort({ createdAt: -1, priority: -1 })
+      .skip(skip)
+      .limit(parseInt(limit))
+      .lean();
+
+    const total = await Notification.countDocuments(query);
+    const unreadCount = await Notification.countDocuments({
+      userId: req.user._id,
+      isRead: false,
+      isArchived: false
+    });
+
+    // ฟังก์ชันคำนวณเวลาที่ผ่านมา
+    function _getTimeAgo(date) {
+      const now = new Date();
+      const diffMs = now - date;
+      const diffSec = Math.floor(diffMs / 1000);
+      const diffMin = Math.floor(diffSec / 60);
+      const diffHour = Math.floor(diffMin / 60);
+      const diffDay = Math.floor(diffHour / 24);
+      
+      if (diffSec < 60) return 'เมื่อสักครู่';
+      if (diffMin < 60) return `${diffMin} นาทีที่แล้ว`;
+      if (diffHour < 24) return `${diffHour} ชั่วโมงที่แล้ว`;
+      if (diffDay === 1) return 'เมื่อวานนี้';
+      if (diffDay < 7) return `${diffDay} วันที่แล้ว`;
+      if (diffDay < 30) return `${Math.floor(diffDay / 7)} สัปดาห์ที่แล้ว`;
+      if (diffDay < 365) return `${Math.floor(diffDay / 30)} เดือนที่แล้ว`;
+      return `${Math.floor(diffDay / 365)} ปีที่แล้ว`;
+    }
+
+    // ฟังก์ชันสร้าง badge สำหรับประเภทต่างๆ
+    function _getBadgeForType(type) {
+      const badges = {
+        'wallet_transaction': '💰',
+        'wallet_points': '⭐',
+        'chat_message': '💬',
+        'chat_call': '📞',
+        'friend_request': '👤',
+        'friend_accept': '🤝',
+        'profile_visit': '👁️',
+        'profile_update': '✏️',
+        'bank_service': '🏦',
+        'identity_verify': '✅',
+        'system_alert': '⚡',
+        'reward_earned': '🎁'
+      };
+      
+      return badges[type] || '🔔';
+    }
+
+    // ✅ แปลงเป็นรูปแบบสำหรับ Frontend
+    const formattedNotifications = notifications.map(notif => ({
+      id: notif._id,
+      type: notif.type,
+      title: notif.title,
+      message: notif.message,
+      icon: notif.icon,
+      color: notif.color,
+      data: notif.data || {},
+      isRead: notif.isRead,
+      priority: notif.priority,
+      createdAt: notif.createdAt,
+      timeAgo: _getTimeAgo(notif.createdAt),
+      badge: _getBadgeForType(notif.type)
+    }));
+
+    console.log('✅ Found', formattedNotifications.length, 'notifications');
+
+    res.json({
+      success: true,
+      notifications: formattedNotifications,
+      stats: {
+        total,
+        unreadCount,
+        page: parseInt(page),
+        limit: parseInt(limit),
+        pages: Math.ceil(total / limit)
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Get notifications error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch notifications'
+    });
+  }
+});
+
+// 👁️ Mark Notification as Read
+app.put('/api/notifications/:id/read', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    console.log('👁️ Marking notification as read:', id);
+
+    const notification = await Notification.findOne({
+      _id: id,
+      userId: req.user._id
+    });
+
+    if (!notification) {
+      return res.status(404).json({
+        success: false,
+        error: 'Notification not found'
+      });
+    }
+
+    if (!notification.isRead) {
+      notification.isRead = true;
+      notification.readAt = new Date();
+      await notification.save();
+      
+      console.log('✅ Notification marked as read');
+    }
+
+    res.json({
+      success: true,
+      message: 'Notification marked as read',
+      notificationId: id,
+      isRead: true
+    });
+
+  } catch (error) {
+    console.error('❌ Mark as read error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to mark notification as read'
+    });
+  }
+});
+
+// 👁️ Mark All Notifications as Read
+app.put('/api/notifications/read-all', authenticateToken, async (req, res) => {
+  try {
+    console.log('👁️ Marking all notifications as read for user:', req.user._id);
+
+    const result = await Notification.updateMany(
+      {
+        userId: req.user._id,
+        isRead: false,
+        isArchived: false
+      },
+      {
+        $set: {
+          isRead: true,
+          readAt: new Date()
+        }
+      }
+    );
+
+    console.log('✅ Marked', result.modifiedCount, 'notifications as read');
+
+    res.json({
+      success: true,
+      message: `Marked ${result.modifiedCount} notifications as read`,
+      count: result.modifiedCount
+    });
+
+  } catch (error) {
+    console.error('❌ Mark all as read error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to mark all notifications as read'
+    });
+  }
+});
+
+// 🗑️ Archive Notification
+app.put('/api/notifications/:id/archive', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    console.log('🗑️ Archiving notification:', id);
+
+    const notification = await Notification.findOne({
+      _id: id,
+      userId: req.user._id
+    });
+
+    if (!notification) {
+      return res.status(404).json({
+        success: false,
+        error: 'Notification not found'
+      });
+    }
+
+    notification.isArchived = true;
+    await notification.save();
+
+    console.log('✅ Notification archived');
+
+    res.json({
+      success: true,
+      message: 'Notification archived',
+      notificationId: id,
+      isArchived: true
+    });
+
+  } catch (error) {
+    console.error('❌ Archive notification error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to archive notification'
+    });
+  }
+});
+
+// 📊 Get Notification Stats
+app.get('/api/notifications/stats', authenticateToken, async (req, res) => {
+  try {
+    console.log('📊 Getting notification stats for user:', req.user._id);
+
+    const stats = await Notification.aggregate([
+      {
+        $match: {
+          userId: req.user._id,
+          isArchived: false
+        }
+      },
+      {
+        $group: {
+          _id: '$type',
+          count: { $sum: 1 },
+          unreadCount: {
+            $sum: { $cond: [{ $eq: ['$isRead', false] }, 1, 0] }
+          }
+        }
+      },
+      {
+        $project: {
+          type: '$_id',
+          count: 1,
+          unreadCount: 1,
+          _id: 0
+        }
+      }
+    ]);
+
+    const totalCount = await Notification.countDocuments({
+      userId: req.user._id,
+      isArchived: false
+    });
+
+    const unreadTotal = await Notification.countDocuments({
+      userId: req.user._id,
+      isRead: false,
+      isArchived: false
+    });
+
+    const recentNotifications = await Notification.find({
+      userId: req.user._id,
+      isArchived: false
+    })
+    .sort({ createdAt: -1 })
+    .limit(5)
+    .select('type title message isRead createdAt')
+    .lean();
+
+    // ฟังก์ชันคำนวณเวลาที่ผ่านมา
+    function _getTimeAgo(date) {
+      const now = new Date();
+      const diffMs = now - date;
+      const diffSec = Math.floor(diffMs / 1000);
+      const diffMin = Math.floor(diffSec / 60);
+      const diffHour = Math.floor(diffMin / 60);
+      const diffDay = Math.floor(diffHour / 24);
+      
+      if (diffSec < 60) return 'เมื่อสักครู่';
+      if (diffMin < 60) return `${diffMin} นาทีที่แล้ว`;
+      if (diffHour < 24) return `${diffHour} ชั่วโมงที่แล้ว`;
+      if (diffDay === 1) return 'เมื่อวานนี้';
+      if (diffDay < 7) return `${diffDay} วันที่แล้ว`;
+      if (diffDay < 30) return `${Math.floor(diffDay / 7)} สัปดาห์ที่แล้ว`;
+      if (diffDay < 365) return `${Math.floor(diffDay / 30)} เดือนที่แล้ว`;
+      return `${Math.floor(diffDay / 365)} ปีที่แล้ว`;
+    }
+
+    console.log('✅ Notification stats loaded');
+
+    res.json({
+      success: true,
+      stats: {
+        total: totalCount,
+        unread: unreadTotal,
+        byType: stats,
+        recent: recentNotifications.map(n => ({
+          type: n.type,
+          title: n.title,
+          message: n.message,
+          isRead: n.isRead,
+          timeAgo: _getTimeAgo(n.createdAt)
+        }))
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Get notification stats error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to get notification stats'
     });
   }
 });
@@ -4150,7 +5120,8 @@ app.get('/api/health', (req, res) => {
       bankServices: true,
       chat: true,
       friends: true,
-      recovery: true
+      recovery: true,
+      notifications: true // ✅ เพิ่มฟีเจอร์การแจ้งเตือน
     }
   });
 });
@@ -4439,6 +5410,15 @@ const startServer = async () => {
     console.log('   • 📞 Phone Number Support');
     console.log('   • 📋 PDPA Consent Tracking');
     console.log('   • 🔐 Enhanced Data Privacy');
+    console.log('📨 NEW NOTIFICATION SYSTEM:');
+    console.log('   • 🔔 Real-time Notifications');
+    console.log('   • 💰 Wallet Transaction Alerts');
+    console.log('   • 💬 Chat Message Notifications');
+    console.log('   • 👥 Friend Request Alerts');
+    console.log('   • 🆔 Identity Verification Updates');
+    console.log('   • 🏦 Bank Service Notifications');
+    console.log('   • 📊 Notification Statistics');
+    console.log('   • 🔔 Push Notification Support');
     console.log('🚀 =================================');
   });
 };
