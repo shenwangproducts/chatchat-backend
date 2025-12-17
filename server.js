@@ -4568,6 +4568,253 @@ app.put('/api/user/settings', authenticateToken, async (req, res) => {
   }
 });
 
+// 🔥 เพิ่มโค้ดนี้ในไฟล์ server.js ของคุณ
+
+// =============================================
+// 📱 FCM TOKEN MANAGEMENT API ROUTES
+// =============================================
+
+// 🔥 Update FCM Token สำหรับ Push Notifications
+app.put('/api/user/fcm-token', authenticateToken, [
+  body('fcmToken')
+    .notEmpty()
+    .withMessage('FCM token is required')
+    .isLength({ min: 10 })
+    .withMessage('FCM token must be at least 10 characters'),
+  body('platform')
+    .optional()
+    .isIn(['android', 'ios', 'web'])
+    .withMessage('Platform must be android, ios, or web')
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({
+        success: false,
+        error: errors.array()[0].msg
+      });
+    }
+
+    const { fcmToken, platform = 'android' } = req.body;
+
+    console.log('📱 Updating FCM token for user:', {
+      userId: req.user._id,
+      username: req.user.username,
+      platform: platform,
+      tokenLength: fcmToken.length,
+      tokenPreview: fcmToken.substring(0, 20) + '...'
+    });
+
+    // 🔄 อัปเดต FCM token ใน database
+    req.user.fcmToken = fcmToken;
+    req.user.updatedAt = new Date();
+    await req.user.save();
+
+    console.log('✅ FCM token updated successfully:', {
+      userId: req.user._id,
+      platform: platform,
+      tokenUpdated: true,
+      updatedAt: req.user.updatedAt
+    });
+
+    // ✅ สร้างการแจ้งเตือนระบบ
+    await createSystemNotification(req.user._id, {
+      alertType: 'info',
+      message: `FCM token updated for ${platform}`,
+      actionUrl: null
+    });
+
+    res.json({
+      success: true,
+      message: 'FCM token updated successfully',
+      tokenUpdated: true,
+      platform: platform,
+      updatedAt: req.user.updatedAt,
+      userInfo: {
+        username: req.user.username,
+        email: req.user.email
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Update FCM token error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to update FCM token: ' + error.message
+    });
+  }
+});
+
+// 🔍 Get FCM Token Status
+app.get('/api/user/fcm-token/status', authenticateToken, async (req, res) => {
+  try {
+    console.log('🔍 Checking FCM token status for user:', {
+      userId: req.user._id,
+      username: req.user.username
+    });
+
+    const hasToken = !!req.user.fcmToken;
+    const tokenAge = hasToken ? 
+      Math.floor((Date.now() - req.user.updatedAt) / (1000 * 60 * 60 * 24)) : 0;
+
+    res.json({
+      success: true,
+      isRegistered: hasToken,
+      lastUpdated: req.user.updatedAt,
+      platform: 'android',
+      hasToken: hasToken,
+      tokenLength: hasToken ? req.user.fcmToken.length : 0,
+      tokenAgeDays: tokenAge,
+      needsRefresh: tokenAge > 30 // รีเฟรชทุก 30 วัน
+    });
+
+  } catch (error) {
+    console.error('❌ Get FCM token status error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to check FCM token status'
+    });
+  }
+});
+
+// 🗑️ Delete FCM Token (สำหรับ logout หรือยกเลิกการแจ้งเตือน)
+app.delete('/api/user/fcm-token', authenticateToken, async (req, res) => {
+  try {
+    console.log('🗑️ Deleting FCM token for user:', {
+      userId: req.user._id,
+      username: req.user.username,
+      hadToken: !!req.user.fcmToken
+    });
+
+    const hadToken = !!req.user.fcmToken;
+    req.user.fcmToken = null;
+    req.user.updatedAt = new Date();
+    await req.user.save();
+
+    if (hadToken) {
+      // ✅ สร้างการแจ้งเตือนระบบ
+      await createSystemNotification(req.user._id, {
+        alertType: 'warning',
+        message: 'FCM token removed. Push notifications disabled.',
+        actionUrl: null
+      });
+    }
+
+    console.log('✅ FCM token deleted successfully');
+
+    res.json({
+      success: true,
+      message: 'FCM token deleted successfully',
+      tokenDeleted: true,
+      hadToken: hadToken,
+      updatedAt: req.user.updatedAt
+    });
+
+  } catch (error) {
+    console.error('❌ Delete FCM token error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to delete FCM token'
+    });
+  }
+});
+
+// 📱 Test Push Notification (สำหรับทดสอบ)
+app.post('/api/notifications/push/test', authenticateToken, [
+  body('title')
+    .notEmpty()
+    .withMessage('Title is required'),
+  body('body')
+    .notEmpty()
+    .withMessage('Body is required')
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({
+        success: false,
+        error: errors.array()[0].msg
+      });
+    }
+
+    const { title, body } = req.body;
+
+    console.log('🧪 Sending test push notification to self:', {
+      userId: req.user._id,
+      username: req.user.username,
+      title: title,
+      body: body
+    });
+
+    if (!req.user.fcmToken) {
+      return res.status(400).json({
+        success: false,
+        error: 'No FCM token registered for this user'
+      });
+    }
+
+    // ✅ สร้างการแจ้งเตือนทดสอบ
+    await createSystemNotification(req.user._id, {
+      alertType: 'test',
+      message: `Test: ${title} - ${body}`,
+      actionUrl: null
+    });
+
+    // TODO: ส่ง push notification จริงผ่าน Firebase Admin SDK
+    console.log('📤 [SIMULATED] Push notification sent to:', req.user.fcmToken.substring(0, 30) + '...');
+
+    res.json({
+      success: true,
+      message: 'Test push notification sent',
+      simulated: true,
+      details: {
+        title: title,
+        body: body,
+        tokenExists: true,
+        timestamp: new Date().toISOString()
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Test push notification error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to send test push notification'
+    });
+  }
+});
+
+// 🔄 Refresh FCM Token (สำหรับ client ที่ต้องการ token ใหม่)
+app.post('/api/user/fcm-token/refresh', authenticateToken, async (req, res) => {
+  try {
+    console.log('🔄 FCM token refresh requested for user:', {
+      userId: req.user._id,
+      username: req.user.username,
+      currentToken: req.user.fcmToken ? 'exists' : 'none'
+    });
+
+    // ไม่ต้องทำอะไรใน server แค่บอกให้ client ส่ง token ใหม่มา
+    // Client ควรเรียก updateFCMToken อีกครั้งด้วย token ใหม่
+
+    res.json({
+      success: true,
+      message: 'Please send new FCM token using update endpoint',
+      needsNewToken: true,
+      currentTokenStatus: req.user.fcmToken ? 'valid' : 'missing'
+    });
+
+  } catch (error) {
+    console.error('❌ Refresh FCM token error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to process refresh request'
+    });
+  }
+});
+// =============================================
+// 📱 END OF FCM TOKEN MANAGEMENT
+// =============================================
+
 // 🆔 Change User ID
 app.put('/api/user/change-id', authenticateToken, [
   body('newUserId')
