@@ -8,9 +8,26 @@ const rateLimit = require('express-rate-limit');
 const helmet = require('helmet');
 require('dotenv').config();
 
+const admin = require('firebase-admin');
+
 const app = express();
 const PORT = process.env.PORT || 30001;
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-in-production';
+
+// Firebase initialization
+if (process.env.FIREBASE_SERVICE_ACCOUNT_KEY) {
+  try {
+    const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_KEY);
+    admin.initializeApp({
+      credential: admin.credential.cert(serviceAccount)
+    });
+    console.log('✅ Firebase initialized successfully');
+  } catch (error) {
+    console.error('❌ Failed to initialize Firebase:', error.message);
+  }
+} else {
+  console.warn('⚠️ FIREBASE_SERVICE_ACCOUNT_KEY not set, push notifications disabled');
+}
 
 // ✅ Security Middleware
 app.use(helmet({
@@ -560,21 +577,21 @@ const createNotification = async ({
 // ✅ ฟังก์ชันส่ง Push Notification
 const sendPushNotification = async (userId, payload) => {
   try {
-    // TODO: ตั้งค่า Firebase Cloud Messaging (FCM) ตรงนี้
-    // ตัวอย่างโครงสร้าง:
-    // const user = await User.findById(userId);
-    // if (user && user.fcmToken) {
-    //   await admin.messaging().send({
-    //     token: user.fcmToken,
-    //     notification: {
-    //       title: payload.title,
-    //       body: payload.body
-    //     },
-    //     data: payload.data
-    //   });
-    // }
-    
-    console.log('📤 Push notification prepared for user:', userId);
+    const user = await User.findById(userId);
+    if (!user || !user.fcmToken) {
+      console.log('📤 User not found or no FCM token for user:', userId);
+      return false;
+    }
+    const message = {
+      token: user.fcmToken,
+      notification: {
+        title: payload.title,
+        body: payload.body
+      },
+      data: payload.data
+    };
+    const response = await admin.messaging().send(message);
+    console.log('📤 Push notification sent successfully:', response);
     return true;
   } catch (error) {
     console.error('❌ Error sending push notification:', error);
@@ -972,6 +989,17 @@ const generateRecoveryId = () => {
   return `REC${timestamp}${random}`.toUpperCase();
 };
 
+const generateUserId = async () => {
+  let userId;
+  let attempts = 0;
+  do {
+    userId = 'USR' + Math.random().toString(36).substr(2, 8).toUpperCase();
+    attempts++;
+    if (attempts > 10) throw new Error('Unable to generate unique userId');
+  } while (await User.findOne({ userId }));
+  return userId;
+};
+
 const generateSalt = () => bcrypt.genSaltSync(12);
 const hashPassword = (password, salt) => bcrypt.hashSync(password + salt, 12);
 const verifyPassword = (password, hash, salt) => bcrypt.compareSync(password + salt, hash);
@@ -1120,7 +1148,7 @@ const createSystemAccount = async () => {
       const systemUser = new User({
         username: 'Connect Support',
         email: 'system@connect.app',
-        passwordHash: hashPassword('system_password_' + Date.now(), salt),
+        passwordHash: hashPassword('support123', salt),
         passwordSalt: salt,
         userType: 'system',
         userId: 'support',
@@ -1152,7 +1180,7 @@ const createAdminUser = async () => {
         passwordHash: hashPassword('admin123', salt),
         passwordSalt: salt,
         userType: 'admin',
-        userId: 'admin'
+        userId: await generateUserId()
       });
       await adminUser.save();
       await createUserWallet(adminUser._id);
