@@ -2930,22 +2930,21 @@ app.get('/api/profile/picture', authenticateToken, async (req, res) => {
 // 💬 Create New Chat
 app.post('/api/chats', authenticateToken, async (req, res) => {
   try {
-    const { participants } = req.body;
+    const { participants, isGroup, name, avatar, backgroundColor } = req.body; // ✅ รับค่าเพิ่ม
     const userId = req.user._id;
 
     console.log('💬 Creating new chat request:', { 
       userId: userId,
-      userEmail: req.user.email,
-      participants: participants 
+      participants: participants,
+      isGroup: isGroup,
+      name: name
     });
 
     if (!participants || !Array.isArray(participants) || participants.length === 0) {
-      return res.status(400).json({
-        success: false,
-        error: 'Participants array is required'
-      });
+      return res.status(400).json({ success: false, error: 'Participants array is required' });
     }
 
+    // แปลง ID เป็น ObjectId
     const users = await User.find({ 
       $or: [
         { userId: { $in: participants } },
@@ -2953,110 +2952,74 @@ app.post('/api/chats', authenticateToken, async (req, res) => {
       ]
     }, 'userId _id username name email profilePicture phone');
 
-    if (users.length !== participants.length) {
-      const foundUserIds = users.map(u => u.userId || u._id.toString());
-      const missingUsers = participants.filter(p => !foundUserIds.includes(p));
-      console.log('❌ Some users not found:', missingUsers);
-      return res.status(400).json({
-        success: false,
-        error: `Users not found: ${missingUsers.join(', ')}`
-      });
-    }
-
     const participantIds = users.map(user => user._id);
     const allParticipants = [userId, ...participantIds];
     const uniqueParticipants = [...new Set(allParticipants.map(id => id.toString()))].map(id => new mongoose.Types.ObjectId(id));
 
-    const existingChat = await Chat.findOne({
-      participants: { $all: uniqueParticipants },
-      $expr: { $eq: [{ $size: "$participants" }, uniqueParticipants.length] }
-    }).populate('participants', 'userId username name email profilePicture phone');
-
-    if (!existingChat) {
-      const otherUsers = users.filter(user => user._id.toString() !== userId.toString());
-      const chatTitle = otherUsers.map(user => user.username).join(', ');
-
-      const newChat = new Chat({
-        participants: uniqueParticipants,
+    // ถ้าเป็นแชทเดี่ยว ให้เช็คว่ามีอยู่แล้วไหม
+    if (!isGroup) {
+      const existingChat = await Chat.findOne({
+        participants: { $all: uniqueParticipants },
         chatType: 'direct',
-        title: chatTitle,
-        lastMessage: 'เริ่มการสนทนา',
-        lastMessageTime: new Date(),
-        createdBy: userId,
-        createdAt: new Date(),
-        updatedAt: new Date()
-      });
+        $expr: { $eq: [{ $size: "$participants" }, uniqueParticipants.length] }
+      }).populate('participants', 'userId username name email profilePicture phone');
 
-      await newChat.save();
-
-      await newChat.populate('participants', 'userId username name email profilePicture phone');
-
-      console.log('✅ New chat created successfully:', {
-        chatId: newChat._id,
-        participants: newChat.participants.map(p => p.username),
-        createdBy: req.user.username
-      });
-
-      const welcomeMessage = new Message({
-        chatId: newChat._id,
-        senderId: userId,
-        messageType: 'system',
-        content: 'เริ่มการสนทนา',
-        timestamp: new Date()
-      });
-
-      await welcomeMessage.save();
-
-      // ✅ สร้างการแจ้งเตือนข้อความใหม่สำหรับผู้ใช้คนอื่น
-      users.forEach(async (user) => {
-        if (user._id.toString() !== userId.toString()) {
-          await createChatMessageNotification(user._id, {
-            senderName: req.user.username,
-            message: 'เริ่มการสนทนา',
-            chatId: newChat._id,
-            messageType: 'text'
-          });
-        }
-      });
-
-      res.json({
-        success: true,
-        chat: {
-          id: newChat._id,
-          _id: newChat._id,
-          participants: newChat.participants,
-          chatType: newChat.chatType,
-          title: newChat.title,
-          createdAt: newChat.createdAt,
-          lastMessage: newChat.lastMessage,
-          lastMessageTime: newChat.lastMessageTime
-        },
-        message: 'Chat created successfully'
-      });
-    } else {
-      console.log('✅ Using existing chat:', existingChat._id);
-      res.json({
-        success: true,
-        chat: {
-          id: existingChat._id,
-          _id: existingChat._id,
-          participants: existingChat.participants,
-          chatType: existingChat.chatType,
-          title: existingChat.title,
-          createdAt: existingChat.createdAt,
-          lastMessage: existingChat.lastMessage,
-          lastMessageTime: existingChat.lastMessageTime
-        },
-        message: 'Chat already exists'
-      });
+      if (existingChat) {
+        return res.json({ success: true, chat: { id: existingChat._id, ...existingChat.toObject() }, message: 'Chat already exists' });
+      }
     }
+
+    // ตั้งชื่อแชท
+    let chatTitle = name;
+    if (!chatTitle) {
+      const otherUsers = users.filter(user => user._id.toString() !== userId.toString());
+      chatTitle = otherUsers.map(user => user.username).join(', ');
+    }
+
+    // ✅ สร้างแชทใหม่ (รองรับกลุ่ม)
+    const newChat = new Chat({
+      participants: uniqueParticipants,
+      chatType: isGroup ? 'group' : 'direct', // ✅ กำหนดประเภท
+      title: chatTitle,
+      lastMessage: isGroup ? 'สร้างกลุ่มแล้ว' : 'เริ่มการสนทนา',
+      lastMessageTime: new Date(),
+      createdBy: userId,
+      // ถ้าคุณมี field สำหรับ avatar หรือ color ใน Schema ให้ใส่ตรงนี้
+      // avatar: avatar, 
+      // backgroundColor: backgroundColor
+    });
+
+    await newChat.save();
+    await newChat.populate('participants', 'userId username name email profilePicture phone');
+
+    // สร้างข้อความต้อนรับ
+    const welcomeMessage = new Message({
+      chatId: newChat._id,
+      senderId: userId,
+      messageType: 'system',
+      content: isGroup ? `สร้างกลุ่ม "${chatTitle}" แล้ว` : 'เริ่มการสนทนา',
+      timestamp: new Date()
+    });
+    await welcomeMessage.save();
+
+    res.json({
+      success: true,
+      chat: {
+        id: newChat._id,
+        _id: newChat._id,
+        participants: newChat.participants,
+        chatType: newChat.chatType,
+        isGroup: newChat.chatType === 'group', // ✅ ส่ง flag กลับไป
+        title: newChat.title,
+        lastMessage: newChat.lastMessage,
+        lastMessageTime: newChat.lastMessageTime
+      },
+      message: 'Chat created successfully'
+    });
 
   } catch (error) {
     console.error('❌ Error creating chat:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Failed to create chat: ' + error.message
-    });
+    res.status(500).json({ success: false, error: 'Failed to create chat: ' + error.message });
   }
 });
 
@@ -3687,21 +3650,36 @@ app.get('/api/chats', authenticateToken, async (req, res) => {
     }
 
     const formattedChats = finalChats.map(chat => {
-      const otherParticipant = chat.participants.find(
-        p => p._id.toString() !== req.user._id.toString()
-      );
-      
+      // ✅ Logic การหาชื่อและรูปภาพที่ถูกต้อง
+      let chatName = chat.title;
+      let chatAvatar = chat.chatType === 'official' ? '💼' : (chat.chatType === 'group' ? '👥' : '👤');
+      let otherParticipant = null;
+      let profilePicture = null;
+
+      // ถ้าเป็นแชทเดี่ยว ให้ใช้ชื่อเพื่อน
+      if (chat.chatType === 'direct') {
+        otherParticipant = chat.participants.find(
+          p => p._id.toString() !== req.user._id.toString()
+        );
+        if (otherParticipant) {
+          chatName = otherParticipant.username;
+          profilePicture = otherParticipant.profilePicture;
+        }
+      } 
+      // ถ้าเป็นกลุ่ม ให้ใช้ชื่อกลุ่ม (chat.title) ซึ่งถูกต้องแล้ว
+
       return {
         id: chat._id,
-        name: otherParticipant ? otherParticipant.username : chat.title,
+        name: chatName,
         lastMessage: chat.lastMessage,
         timestamp: chat.lastMessageTime,
         unreadCount: chat.unreadCount.get(req.user._id.toString()) || 0,
         isOnline: otherParticipant ? (otherParticipant.userType === 'system' ? true : false) : false,
-        avatar: otherParticipant ? '👤' : '💼',
+        avatar: chatAvatar,
         chatType: chat.chatType,
         isOfficial: chat.chatType === 'official',
-        profilePicture: otherParticipant?.profilePicture || null,
+        isGroup: chat.chatType === 'group', // ✅ สำคัญ: ต้องส่งค่านี้เพื่อให้แอปแยกกลุ่มได้
+        profilePicture: profilePicture,
         contactId: otherParticipant?.userId || otherParticipant?._id.toString(),
         phone: otherParticipant?.phone || null
       };
@@ -3720,6 +3698,67 @@ app.get('/api/chats', authenticateToken, async (req, res) => {
       success: false,
       error: 'Failed to fetch chats'
     });
+  }
+});
+
+// 🔔 Route: Send Chat Push Notification (Manual)
+app.post('/api/chat/push-notification', authenticateToken, async (req, res) => {
+  try {
+    const { chatId, senderName, message, messageType = 'text' } = req.body;
+
+    console.log('🔔 Manual push notification request:', { chatId, senderName });
+
+    const chat = await Chat.findById(chatId).populate('participants');
+    if (!chat) {
+      return res.status(404).json({ success: false, error: 'Chat not found' });
+    }
+
+    // กำหนดหัวข้อและเนื้อหา
+    let notificationTitle = senderName;
+    let notificationBody = message;
+
+    // ✅ ถ้าเป็นกลุ่ม ให้หัวข้อเป็นชื่อกลุ่ม
+    if (chat.chatType === 'group') {
+      notificationTitle = chat.title;
+      notificationBody = `${senderName}: ${message}`;
+    }
+
+    // ส่งหาทุกคนในแชท ยกเว้นคนส่ง
+    const recipients = chat.participants.filter(p => p._id.toString() !== req.user._id.toString());
+
+    if (recipients.length === 0) {
+      return res.json({ success: true, message: 'No recipients' });
+    }
+
+    // ส่ง Notification
+    const promises = recipients.map(async (recipient) => {
+      // เรียกใช้ฟังก์ชัน createNotification ที่มีอยู่แล้วในโค้ดของคุณ
+      return createNotification({
+        userId: recipient._id,
+        type: 'chat_message',
+        title: notificationTitle,
+        message: notificationBody,
+        icon: chat.chatType === 'group' ? '👥' : '💬',
+        color: '#1FAE4B',
+        data: {
+          chatId: chatId.toString(),
+          senderName,
+          messageType,
+          isGroup: chat.chatType === 'group',
+          timestamp: new Date().toISOString()
+        },
+        priority: 'high',
+        sourceId: `chat_push_${chatId}_${Date.now()}`
+      });
+    });
+
+    await Promise.all(promises);
+
+    res.json({ success: true, message: 'Notifications sent', count: recipients.length });
+
+  } catch (error) {
+    console.error('❌ Push notification error:', error);
+    res.status(500).json({ success: false, error: 'Failed to send notification' });
   }
 });
 
