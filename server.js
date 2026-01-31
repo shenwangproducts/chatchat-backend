@@ -3762,6 +3762,67 @@ app.post('/api/chat/push-notification', authenticateToken, async (req, res) => {
   }
 });
 
+// 🔔 Route: Send Chat Push Notification (Manual)
+app.post('/api/chat/push-notification', authenticateToken, async (req, res) => {
+  try {
+    const { chatId, senderName, message, messageType = 'text' } = req.body;
+
+    console.log('🔔 Manual push notification request:', { chatId, senderName });
+
+    const chat = await Chat.findById(chatId).populate('participants');
+    if (!chat) {
+      return res.status(404).json({ success: false, error: 'Chat not found' });
+    }
+
+    // กำหนดหัวข้อและเนื้อหา
+    let notificationTitle = senderName;
+    let notificationBody = message;
+
+    // ✅ ถ้าเป็นกลุ่ม ให้หัวข้อเป็นชื่อกลุ่ม
+    if (chat.chatType === 'group') {
+      notificationTitle = chat.title;
+      notificationBody = `${senderName}: ${message}`;
+    }
+
+    // ส่งหาทุกคนในแชท ยกเว้นคนส่ง
+    const recipients = chat.participants.filter(p => p._id.toString() !== req.user._id.toString());
+
+    if (recipients.length === 0) {
+      return res.json({ success: true, message: 'No recipients' });
+    }
+
+    // ส่ง Notification
+    const promises = recipients.map(async (recipient) => {
+      // เรียกใช้ฟังก์ชัน createNotification ที่มีอยู่แล้วในโค้ดของคุณ
+      return createNotification({
+        userId: recipient._id,
+        type: 'chat_message',
+        title: notificationTitle,
+        message: notificationBody,
+        icon: chat.chatType === 'group' ? '👥' : '💬',
+        color: '#1FAE4B',
+        data: {
+          chatId: chatId.toString(),
+          senderName,
+          messageType,
+          isGroup: chat.chatType === 'group',
+          timestamp: new Date().toISOString()
+        },
+        priority: 'high',
+        sourceId: `chat_push_${chatId}_${Date.now()}`
+      });
+    });
+
+    await Promise.all(promises);
+
+    res.json({ success: true, message: 'Notifications sent', count: recipients.length });
+
+  } catch (error) {
+    console.error('❌ Push notification error:', error);
+    res.status(500).json({ success: false, error: 'Failed to send notification' });
+  }
+});
+
 // 💬 Get Chat Messages
 app.get('/api/chats/:chatId/messages', authenticateToken, async (req, res) => {
   try {
