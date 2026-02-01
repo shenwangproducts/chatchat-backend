@@ -68,7 +68,10 @@ const storage = multer.diskStorage({
     cb(null, Date.now() + '-' + Math.round(Math.random() * 1E9) + path.extname(file.originalname));
   }
 });
-const upload = multer({ storage: storage });
+const upload = multer({ 
+  storage: storage,
+  limits: { fileSize: 10 * 1024 * 1024 } // 10MB limit
+});
 
 // ✅ MongoDB Connection
 const mongoURI = process.env.MONGODB_URI;
@@ -5590,6 +5593,53 @@ app.post('/api/groups/:id/picture', authenticateToken, async (req, res) => {
     res.json({ success: true, message: 'Group picture updated' });
   } catch (error) {
     res.status(500).json({ success: false, error: 'Failed to upload picture' });
+  }
+});
+
+// 👥 Update Group Member Roles
+app.put('/api/groups/:id/members/roles', authenticateToken, async (req, res) => {
+  try {
+    const { memberIds, roles } = req.body;
+    
+    if (!memberIds || !roles || !Array.isArray(memberIds) || !Array.isArray(roles) || memberIds.length !== roles.length) {
+      return res.status(400).json({ success: false, error: 'Invalid input: memberIds and roles must be arrays of equal length' });
+    }
+
+    const chat = await Chat.findOne({ _id: req.params.id, chatType: 'group' });
+    if (!chat) return res.status(404).json({ success: false, error: 'Group not found' });
+
+    // Check if requester is admin or creator
+    const isRequesterAdmin = chat.admins && chat.admins.some(id => id.toString() === req.user._id.toString());
+    const isRequesterCreator = chat.createdBy && chat.createdBy.toString() === req.user._id.toString();
+
+    if (!isRequesterAdmin && !isRequesterCreator) {
+      return res.status(403).json({ success: false, error: 'Only admins can update member roles' });
+    }
+
+    // Update roles
+    memberIds.forEach((memberId, index) => {
+      const role = roles[index];
+      
+      // Ensure member is part of the group
+      if (chat.participants.some(p => p.toString() === memberId)) {
+        if (role === 'admin') {
+          // Add to admins if not already there
+          if (!chat.admins.some(a => a.toString() === memberId)) {
+            chat.admins.push(memberId);
+          }
+        } else if (role === 'member') {
+          // Remove from admins
+          chat.admins = chat.admins.filter(a => a.toString() !== memberId);
+        }
+      }
+    });
+
+    await chat.save();
+    
+    res.json({ success: true, message: 'Member roles updated successfully' });
+  } catch (error) {
+    console.error('❌ Update member roles error:', error);
+    res.status(500).json({ success: false, error: 'Failed to update member roles' });
   }
 });
 
