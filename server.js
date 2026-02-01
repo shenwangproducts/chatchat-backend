@@ -5388,16 +5388,23 @@ app.get('/api/groups/:id', authenticateToken, async (req, res) => {
 app.put('/api/groups/:id', authenticateToken, async (req, res) => {
   try {
     const { name, description, groupPicture } = req.body;
-    const updateData = {};
-    if (name) updateData.title = name;
-    if (description) updateData.description = description;
-    if (groupPicture) updateData.groupPicture = groupPicture;
+    
+    const chat = await Chat.findOne({ _id: req.params.id, chatType: 'group' });
+    if (!chat) return res.status(404).json({ success: false, error: 'Group not found' });
 
-    const chat = await Chat.findOneAndUpdate(
-      { _id: req.params.id, chatType: 'group' }, // Add admin check if needed
-      updateData,
-      { new: true }
-    );
+    // Check if admin
+    const isAdmin = chat.admins && chat.admins.some(id => id.toString() === req.user._id.toString());
+    const isCreator = chat.createdBy && chat.createdBy.toString() === req.user._id.toString();
+    
+    if (!isAdmin && !isCreator) {
+      return res.status(403).json({ success: false, error: 'Only admins can update group settings' });
+    }
+
+    if (name) chat.title = name;
+    if (description) chat.description = description;
+    if (groupPicture) chat.groupPicture = groupPicture;
+
+    await chat.save();
     res.json({ success: true, group: chat });
   } catch (error) {
     res.status(500).json({ success: false, error: 'Failed to update group' });
@@ -5465,7 +5472,10 @@ app.post('/api/groups/:id/delete', authenticateToken, async (req, res) => {
     if (!chat) return res.status(404).json({ success: false, error: 'Group not found' });
     
     // Check if admin
-    if (!chat.admins.includes(req.user._id) && chat.createdBy.toString() !== req.user._id.toString()) {
+    const isAdmin = chat.admins && chat.admins.some(id => id.toString() === req.user._id.toString());
+    const isCreator = chat.createdBy && chat.createdBy.toString() === req.user._id.toString();
+
+    if (!isAdmin && !isCreator) {
       return res.status(403).json({ success: false, error: 'Only admins can delete the group' });
     }
 
@@ -5487,6 +5497,14 @@ app.delete('/api/groups/:id', authenticateToken, async (req, res) => {
     const chat = await Chat.findOne({ _id: req.params.id, chatType: 'group' });
     if (!chat) return res.status(404).json({ success: false, error: 'Group not found' });
     
+    // Check if admin
+    const isAdmin = chat.admins && chat.admins.some(id => id.toString() === req.user._id.toString());
+    const isCreator = chat.createdBy && chat.createdBy.toString() === req.user._id.toString();
+
+    if (!isAdmin && !isCreator) {
+      return res.status(403).json({ success: false, error: 'Only admins can delete the group' });
+    }
+
     await Message.deleteMany({ chatId: chat._id });
     await Chat.deleteOne({ _id: chat._id });
     
