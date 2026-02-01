@@ -5389,6 +5389,7 @@ app.put('/api/groups/:id', authenticateToken, async (req, res) => {
   try {
     const { name, description, groupPicture } = req.body;
     
+
     const chat = await Chat.findOne({ _id: req.params.id, chatType: 'group' });
     if (!chat) return res.status(404).json({ success: false, error: 'Group not found' });
 
@@ -5396,6 +5397,7 @@ app.put('/api/groups/:id', authenticateToken, async (req, res) => {
     const isAdmin = chat.admins && chat.admins.some(id => id.toString() === req.user._id.toString());
     const isCreator = chat.createdBy && chat.createdBy.toString() === req.user._id.toString();
     
+
     if (!isAdmin && !isCreator) {
       return res.status(403).json({ success: false, error: 'Only admins can update group settings' });
     }
