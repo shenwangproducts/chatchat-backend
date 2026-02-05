@@ -463,6 +463,22 @@ recoveryIdSchema.index({ recoveryId: 1 });
 
 const RecoveryId = mongoose.model('RecoveryId', recoveryIdSchema);
 
+// File Schema
+const fileSchema = new mongoose.Schema({
+  filename: { type: String, required: true, unique: true }, // The name on disk
+  originalName: { type: String, required: true },
+  mimetype: { type: String, required: true },
+  size: { type: Number, required: true },
+  url: { type: String, required: true },
+  uploadedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
+  chatId: { type: mongoose.Schema.Types.ObjectId, ref: 'Chat', index: true },
+  createdAt: { type: Date, default: Date.now }
+});
+
+fileSchema.index({ filename: 1 });
+
+const File = mongoose.model('File', fileSchema);
+
 // =============================================
 // 📨 NOTIFICATION SYSTEM
 // =============================================
@@ -5387,6 +5403,54 @@ app.get('/api/groups/:id', authenticateToken, async (req, res) => {
   }
 });
 
+// 👥 Get Group Members
+app.get('/api/groups/:id/members', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { page = 1, limit = 50 } = req.query;
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+
+    const chat = await Chat.findOne({
+      _id: id,
+      chatType: 'group',
+      participants: req.user._id
+    }).select('participants admins createdBy');
+
+    if (!chat) {
+      return res.status(404).json({ success: false, error: 'Group not found or you are not a member' });
+    }
+
+    const total = chat.participants.length;
+
+    const members = await User.find({
+      _id: { $in: chat.participants }
+    })
+    .select('username userId profilePicture userType lastLogin')
+    .skip(skip)
+    .limit(parseInt(limit))
+    .lean();
+
+    const formattedMembers = members.map(member => ({
+      ...member,
+      role: chat.admins.some(adminId => adminId.equals(member._id)) ? 'admin' : (chat.createdBy.equals(member._id) ? 'creator' : 'member')
+    }));
+
+    res.json({
+      success: true,
+      members: formattedMembers,
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total,
+        pages: Math.ceil(total / parseInt(limit))
+      }
+    });
+  } catch (error) {
+    console.error('❌ Get group members error:', error);
+    res.status(500).json({ success: false, error: 'Failed to get group members' });
+  }
+});
+
 // 👥 Update Group
 app.put('/api/groups/:id', authenticateToken, async (req, res) => {
   try {
@@ -5647,23 +5711,93 @@ app.put('/api/groups/:id/members/roles', authenticateToken, async (req, res) => 
 // 🗂️ FILE UPLOAD ROUTES
 // =============================================
 
-app.post('/api/upload', authenticateToken, upload.single('file'), (req, res) => {
+app.post('/api/upload', authenticateToken, upload.single('file'), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ success: false, error: 'No file uploaded' });
-    
-    // In a real app, upload to S3/Cloudinary and return that URL.
-    // Here we return the local server URL.
+
     const fileUrl = `${req.protocol}://${req.get('host')}/uploads/${req.file.filename}`;
-    
-    res.json({ 
-      success: true, 
+
+    const newFile = new File({
+        filename: req.file.filename,
+        originalName: req.file.originalname,
+        mimetype: req.file.mimetype,
+        size: req.file.size,
+        url: fileUrl,
+        uploadedBy: req.user._id,
+        chatId: req.body.chatId || req.body.groupId
+    });
+
+    await newFile.save();
+
+    res.json({
+      success: true,
+      fileId: newFile._id,
       fileUrl: fileUrl,
       fileName: req.file.originalname,
       fileType: req.file.mimetype
     });
   } catch (error) {
     console.error('❌ Upload error:', error);
+    if (req.file) {
+      fs.unlink(req.file.path, (err) => {
+        if (err) console.error('❌ Error deleting orphaned file:', err);
+      });
+    }
     res.status(500).json({ success: false, error: 'Upload failed' });
+  }
+});
+
+// 📁 Get File Info
+app.get('/api/files/:fileId', authenticateToken, async (req, res) => {
+  try {
+    const file = await File.findById(req.params.fileId).populate('uploadedBy', 'username userId');
+    if (!file) {
+      return res.status(404).json({ success: false, error: 'File not found' });
+    }
+
+    // Authorization: check if user is part of the chat the file was uploaded to
+    if (file.chatId) {
+      const chat = await Chat.findOne({ _id: file.chatId, participants: req.user._id });
+      if (!chat) {
+        return res.status(403).json({ success: false, error: 'Access denied' });
+      }
+    } else {
+      // If no chat is associated, only the uploader can see it
+      if (file.uploadedBy._id.toString() !== req.user._id.toString()) {
+        return res.status(403).json({ success: false, error: 'Access denied' });
+      }
+    }
+
+    res.json({ success: true, file: file });
+  } catch (error) {
+    console.error('❌ Get file info error:', error);
+    res.status(500).json({ success: false, error: 'Failed to get file info' });
+  }
+});
+
+// 🗑️ Delete File
+app.delete('/api/files/:fileId', authenticateToken, async (req, res) => {
+  try {
+    const file = await File.findById(req.params.fileId);
+    if (!file) {
+      return res.status(404).json({ success: false, error: 'File not found' });
+    }
+
+    if (file.uploadedBy.toString() !== req.user._id.toString()) {
+      return res.status(403).json({ success: false, error: 'You are not authorized to delete this file' });
+    }
+
+    const filePath = path.join('uploads', file.filename);
+    if (fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+    }
+
+    await File.deleteOne({ _id: file._id });
+
+    res.json({ success: true, message: 'File deleted successfully' });
+  } catch (error) {
+    console.error('❌ Delete file error:', error);
+    res.status(500).json({ success: false, error: 'Failed to delete file' });
   }
 });
 
