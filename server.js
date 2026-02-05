@@ -17,6 +17,9 @@ const app = express();
 const PORT = process.env.PORT || 30001;
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-in-production';
 
+// ✅ Trust Proxy (Required for Render/Heroku behind load balancer)
+app.set('trust proxy', 1);
+
 // Firebase initialization
 if (process.env.FIREBASE_SERVICE_ACCOUNT_KEY) {
   try {
