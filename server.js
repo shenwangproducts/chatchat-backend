@@ -68,9 +68,22 @@ const storage = multer.diskStorage({
     cb(null, Date.now() + '-' + Math.round(Math.random() * 1E9) + path.extname(file.originalname));
   }
 });
+
+const fileFilter = (req, file, cb) => {
+  const allowedTypes = /jpeg|jpg|png|gif|pdf|doc|docx|xls|xlsx|mp4|mov|mp3|wav/;
+  const mimetype = allowedTypes.test(file.mimetype);
+  const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
+
+  if (mimetype && extname) {
+    return cb(null, true);
+  }
+  cb(new Error('File type not allowed: ' + file.mimetype));
+};
+
 const upload = multer({ 
   storage: storage,
-  limits: { fileSize: 10 * 1024 * 1024 } // 10MB limit
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB limit
+  fileFilter: fileFilter
 });
 
 // ✅ MongoDB Connection
@@ -96,7 +109,6 @@ db.once('open', () => {
 // =============================================
 // 🗃️ DATABASE SCHEMAS
 // =============================================
-
 // User Schema
 const userSchema = new mongoose.Schema({
   username: { 
@@ -1029,6 +1041,24 @@ const createSystemNotification = async (userId, systemData) => {
 // =============================================
 // 🔧 UTILITY FUNCTIONS
 // =============================================
+
+const _getTimeAgo = (date) => {
+  const now = new Date();
+  const diffMs = now - date;
+  const diffSec = Math.floor(diffMs / 1000);
+  const diffMin = Math.floor(diffSec / 60);
+  const diffHour = Math.floor(diffMin / 60);
+  const diffDay = Math.floor(diffHour / 24);
+  
+  if (diffSec < 60) return 'เมื่อสักครู่';
+  if (diffMin < 60) return `${diffMin} นาทีที่แล้ว`;
+  if (diffHour < 24) return `${diffHour} ชั่วโมงที่แล้ว`;
+  if (diffDay === 1) return 'เมื่อวานนี้';
+  if (diffDay < 7) return `${diffDay} วันที่แล้ว`;
+  if (diffDay < 30) return `${Math.floor(diffDay / 7)} สัปดาห์ที่แล้ว`;
+  if (diffDay < 365) return `${Math.floor(diffDay / 30)} เดือนที่แล้ว`;
+  return `${Math.floor(diffDay / 365)} ปีที่แล้ว`;
+};
 
 const generateRecoveryId = () => {
   const timestamp = Date.now().toString(36);
@@ -3809,67 +3839,6 @@ app.post('/api/chat/push-notification', authenticateToken, async (req, res) => {
   }
 });
 
-// 🔔 Route: Send Chat Push Notification (Manual)
-app.post('/api/chat/push-notification', authenticateToken, async (req, res) => {
-  try {
-    const { chatId, senderName, message, messageType = 'text' } = req.body;
-
-    console.log('🔔 Manual push notification request:', { chatId, senderName });
-
-    const chat = await Chat.findById(chatId).populate('participants');
-    if (!chat) {
-      return res.status(404).json({ success: false, error: 'Chat not found' });
-    }
-
-    // กำหนดหัวข้อและเนื้อหา
-    let notificationTitle = senderName;
-    let notificationBody = message;
-
-    // ✅ ถ้าเป็นกลุ่ม ให้หัวข้อเป็นชื่อกลุ่ม
-    if (chat.chatType === 'group') {
-      notificationTitle = chat.title;
-      notificationBody = `${senderName}: ${message}`;
-    }
-
-    // ส่งหาทุกคนในแชท ยกเว้นคนส่ง
-    const recipients = chat.participants.filter(p => p._id.toString() !== req.user._id.toString());
-
-    if (recipients.length === 0) {
-      return res.json({ success: true, message: 'No recipients' });
-    }
-
-    // ส่ง Notification
-    const promises = recipients.map(async (recipient) => {
-      // เรียกใช้ฟังก์ชัน createNotification ที่มีอยู่แล้วในโค้ดของคุณ
-      return createNotification({
-        userId: recipient._id,
-        type: 'chat_message',
-        title: notificationTitle,
-        message: notificationBody,
-        icon: chat.chatType === 'group' ? '👥' : '💬',
-        color: '#1FAE4B',
-        data: {
-          chatId: chatId.toString(),
-          senderName,
-          messageType,
-          isGroup: chat.chatType === 'group',
-          timestamp: new Date().toISOString()
-        },
-        priority: 'high',
-        sourceId: `chat_push_${chatId}_${Date.now()}`
-      });
-    });
-
-    await Promise.all(promises);
-
-    res.json({ success: true, message: 'Notifications sent', count: recipients.length });
-
-  } catch (error) {
-    console.error('❌ Push notification error:', error);
-    res.status(500).json({ success: false, error: 'Failed to send notification' });
-  }
-});
-
 // 💬 Get Chat Messages
 app.get('/api/chats/:chatId/messages', authenticateToken, async (req, res) => {
   try {
@@ -4241,25 +4210,6 @@ app.get('/api/notifications', authenticateToken, async (req, res) => {
       isArchived: false
     });
 
-    // ฟังก์ชันคำนวณเวลาที่ผ่านมา
-    function _getTimeAgo(date) {
-      const now = new Date();
-      const diffMs = now - date;
-      const diffSec = Math.floor(diffMs / 1000);
-      const diffMin = Math.floor(diffSec / 60);
-      const diffHour = Math.floor(diffMin / 60);
-      const diffDay = Math.floor(diffHour / 24);
-      
-      if (diffSec < 60) return 'เมื่อสักครู่';
-      if (diffMin < 60) return `${diffMin} นาทีที่แล้ว`;
-      if (diffHour < 24) return `${diffHour} ชั่วโมงที่แล้ว`;
-      if (diffDay === 1) return 'เมื่อวานนี้';
-      if (diffDay < 7) return `${diffDay} วันที่แล้ว`;
-      if (diffDay < 30) return `${Math.floor(diffDay / 7)} สัปดาห์ที่แล้ว`;
-      if (diffDay < 365) return `${Math.floor(diffDay / 30)} เดือนที่แล้ว`;
-      return `${Math.floor(diffDay / 365)} ปีที่แล้ว`;
-    }
-
     // ฟังก์ชันสร้าง badge สำหรับประเภทต่างๆ
     function _getBadgeForType(type) {
       const badges = {
@@ -4488,25 +4438,6 @@ app.get('/api/notifications/stats', authenticateToken, async (req, res) => {
     .limit(5)
     .select('type title message isRead createdAt')
     .lean();
-
-    // ฟังก์ชันคำนวณเวลาที่ผ่านมา
-    function _getTimeAgo(date) {
-      const now = new Date();
-      const diffMs = now - date;
-      const diffSec = Math.floor(diffMs / 1000);
-      const diffMin = Math.floor(diffSec / 60);
-      const diffHour = Math.floor(diffMin / 60);
-      const diffDay = Math.floor(diffHour / 24);
-      
-      if (diffSec < 60) return 'เมื่อสักครู่';
-      if (diffMin < 60) return `${diffMin} นาทีที่แล้ว`;
-      if (diffHour < 24) return `${diffHour} ชั่วโมงที่แล้ว`;
-      if (diffDay === 1) return 'เมื่อวานนี้';
-      if (diffDay < 7) return `${diffDay} วันที่แล้ว`;
-      if (diffDay < 30) return `${Math.floor(diffDay / 7)} สัปดาห์ที่แล้ว`;
-      if (diffDay < 365) return `${Math.floor(diffDay / 30)} เดือนที่แล้ว`;
-      return `${Math.floor(diffDay / 365)} ปีที่แล้ว`;
-    }
 
     console.log('✅ Notification stats loaded');
 
