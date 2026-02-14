@@ -59,6 +59,7 @@ app.use(cors({
 app.use(express.json({ limit: '10mb' }));
 // Serve uploaded files
 app.use('/uploads', express.static('uploads'));
+app.use('/uploads/media', express.static('uploads/media'));
 
 // ✅ Configure Multer for file uploads
 const storage = multer.diskStorage({
@@ -87,6 +88,36 @@ const upload = multer({
   storage: storage,
   limits: { fileSize: 10 * 1024 * 1024 }, // 10MB limit
   fileFilter: fileFilter
+});
+
+// ✅ Configure Multer for media uploads (videos, photos) - Higher file size limit
+const mediaStorage = multer.diskStorage({
+  destination: function (req, file, cb) {
+    const uploadDir = 'uploads/media/';
+    if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
+    cb(null, uploadDir);
+  },
+  filename: function (req, file, cb) {
+    const uploadId = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    cb(null, uploadId + path.extname(file.originalname));
+  }
+});
+
+const mediaFilter = (req, file, cb) => {
+  const allowedTypes = /jpeg|jpg|png|gif|mp4|mov|webm|avi|mkv|flv|wmv/;
+  const mimetype = allowedTypes.test(file.mimetype);
+  const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
+
+  if (mimetype && extname) {
+    return cb(null, true);
+  }
+  cb(new Error('Media type not allowed: ' + file.mimetype));
+};
+
+const mediaUpload = multer({ 
+  storage: mediaStorage,
+  limits: { fileSize: 500 * 1024 * 1024 }, // 500MB limit for media
+  fileFilter: mediaFilter
 });
 
 // ✅ MongoDB Connection
@@ -495,7 +526,93 @@ fileSchema.index({ filename: 1 });
 const File = mongoose.model('File', fileSchema);
 
 // =============================================
-// 📨 NOTIFICATION SYSTEM
+// � MEDIA UPLOAD TRACKING SCHEMAS
+// =============================================
+
+// MediaUpload Schema - สำหรับติดตามการอัพโหลด media content (วิดีโอ, รูปภาพ, ฯลฯ)
+const mediaUploadSchema = new mongoose.Schema({
+  uploadId: { type: String, unique: true, required: true, index: true }, // Unique identifier for tracking
+  userId: { 
+    type: mongoose.Schema.Types.ObjectId, 
+    ref: 'User', 
+    required: true,
+    index: true 
+  },
+  fileName: { type: String, required: true },
+  fileType: { type: String, required: true }, // 'video', 'photo', 'camera'
+  mimeType: { type: String, required: true },
+  fileSize: { type: Number, required: true }, // in bytes
+  title: { type: String, required: true },
+  description: { type: String },
+  filePath: { type: String, required: true }, // saved location
+  fileUrl: { type: String }, // URL to access the file
+  thumbnailUrl: { type: String }, // For videos
+  duration: { type: Number }, // Video duration in seconds
+  uploadProgress: { type: Number, default: 0 }, // 0-100%
+  status: {
+    type: String,
+    enum: ['pending', 'uploading', 'completed', 'failed', 'cancelled'],
+    default: 'pending',
+    index: true
+  },
+  chatId: { type: mongoose.Schema.Types.ObjectId, ref: 'Chat', sparse: true },
+  groupId: { type: mongoose.Schema.Types.ObjectId, ref: 'Group', sparse: true },
+  uploadedAt: { type: Date, default: Date.now },
+  completedAt: { type: Date, sparse: true },
+  cancelledAt: { type: Date, sparse: true },
+  errorMessage: { type: String },
+  retryCount: { type: Number, default: 0 },
+  metadata: { type: Map, of: mongoose.Schema.Types.Mixed }
+});
+
+mediaUploadSchema.index({ userId: 1, uploadedAt: -1 });
+mediaUploadSchema.index({ status: 1, uploadedAt: -1 });
+mediaUploadSchema.index({ uploadId: 1 });
+
+const MediaUpload = mongoose.model('MediaUpload', mediaUploadSchema);
+
+// UploadProgress Schema - สำหรับให้ไคลเอนต์ติดตามความคืบหน้า
+const uploadProgressSchema = new mongoose.Schema({
+  uploadId: { type: String, unique: true, required: true, index: true },
+  userId: { 
+    type: mongoose.Schema.Types.ObjectId, 
+    ref: 'User', 
+    required: true,
+    index: true 
+  },
+  bytesUploaded: { type: Number, default: 0 },
+  totalBytes: { type: Number, required: true },
+  percentComplete: { type: Number, default: 0 }, // 0-100
+  status: {
+    type: String,
+    enum: ['pending', 'uploading', 'paused', 'completed', 'failed', 'cancelled'],
+    default: 'pending'
+  },
+  speed: { type: Number, default: 0 }, // bytes per second
+  remainingTime: { type: Number, default: 0 }, // seconds
+  startTime: { type: Date, default: Date.now },
+  lastUpdateTime: { type: Date, default: Date.now },
+  completedTime: { type: Date, sparse: true },
+  errorMessage: { type: String },
+  chunks: [{
+    chunkIndex: { type: Number, required: true },
+    size: { type: Number, required: true },
+    status: { 
+      type: String, 
+      enum: ['pending', 'uploading', 'completed', 'failed'],
+      default: 'pending'
+    },
+    uploadedAt: { type: Date }
+  }]
+});
+
+uploadProgressSchema.index({ uploadId: 1 });
+uploadProgressSchema.index({ userId: 1, uploadId: 1 });
+
+const UploadProgress = mongoose.model('UploadProgress', uploadProgressSchema);
+
+// =============================================
+// �📨 NOTIFICATION SYSTEM
 // =============================================
 
 // Notification Schema
@@ -5732,6 +5849,211 @@ app.delete('/api/files/:fileId', authenticateToken, async (req, res) => {
   } catch (error) {
     console.error('❌ Delete file error:', error);
     res.status(500).json({ success: false, error: 'Failed to delete file' });
+  }
+});
+
+// =============================================
+// 📤 MEDIA UPLOAD ENDPOINTS
+// =============================================
+
+// 📤 POST /api/upload/media - Upload media content (video, photo, camera recording)
+app.post('/api/upload/media', authenticateToken, mediaUpload.single('file'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ success: false, error: 'No file uploaded' });
+    }
+
+    const { fileName, fileType, title, description, chatId, groupId } = req.body;
+
+    if (!fileType || !title) {
+      // Clean up uploaded file
+      fs.unlinkSync(req.file.path);
+      return res.status(400).json({ success: false, error: 'Missing required fields: fileType and title' });
+    }
+
+    // Validate fileType
+    if (!['video', 'photo', 'camera'].includes(fileType)) {
+      fs.unlinkSync(req.file.path);
+      return res.status(400).json({ success: false, error: 'Invalid fileType. Allowed: video, photo, camera' });
+    }
+
+    const uploadId = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    const fileUrl = `${req.protocol}://${req.get('host')}/uploads/media/${req.file.filename}`;
+
+    // Create MediaUpload record
+    const mediaUploadRecord = new MediaUpload({
+      uploadId: uploadId,
+      userId: req.user._id,
+      fileName: fileName || req.file.originalname,
+      fileType: fileType,
+      mimeType: req.file.mimetype,
+      fileSize: req.file.size,
+      title: title,
+      description: description,
+      filePath: req.file.path,
+      fileUrl: fileUrl,
+      status: 'completed',
+      chatId: chatId || null,
+      groupId: groupId || null,
+      uploadProgress: 100,
+      completedAt: new Date()
+    });
+
+    await mediaUploadRecord.save();
+
+    // Create UploadProgress record
+    const uploadProgressRecord = new UploadProgress({
+      uploadId: uploadId,
+      userId: req.user._id,
+      bytesUploaded: req.file.size,
+      totalBytes: req.file.size,
+      percentComplete: 100,
+      status: 'completed',
+      completedTime: new Date()
+    });
+
+    await uploadProgressRecord.save();
+
+    console.log('✅ Media uploaded successfully:', {
+      uploadId: uploadId,
+      fileName: fileName || req.file.originalname,
+      fileType: fileType,
+      fileSize: req.file.size,
+      status: 'completed'
+    });
+
+    res.status(201).json({
+      success: true,
+      message: 'Media uploaded successfully',
+      uploadId: uploadId,
+      fileUrl: fileUrl,
+      fileName: fileName || req.file.originalname,
+      fileType: fileType,
+      fileSize: req.file.size,
+      status: 'completed'
+    });
+
+  } catch (error) {
+    console.error('❌ Media upload error:', error);
+    // Clean up uploaded file on error
+    if (req.file && fs.existsSync(req.file.path)) {
+      try {
+        fs.unlinkSync(req.file.path);
+      } catch (unlinkError) {
+        console.error('❌ Error deleting file:', unlinkError);
+      }
+    }
+    res.status(500).json({ success: false, error: 'Media upload failed: ' + error.message });
+  }
+});
+
+// 📊 GET /api/upload/progress/:uploadId - Get upload progress
+app.get('/api/upload/progress/:uploadId', authenticateToken, async (req, res) => {
+  try {
+    const { uploadId } = req.params;
+
+    const uploadProgress = await UploadProgress.findOne({ uploadId: uploadId });
+
+    if (!uploadProgress) {
+      return res.status(404).json({ success: false, error: 'Upload not found' });
+    }
+
+    // Verify ownership
+    if (uploadProgress.userId.toString() !== req.user._id.toString()) {
+      return res.status(403).json({ success: false, error: 'Access denied: this is not your upload' });
+    }
+
+    const mediaUpload = await MediaUpload.findOne({ uploadId: uploadId });
+
+    res.json({
+      success: true,
+      uploadId: uploadId,
+      progress: {
+        bytesUploaded: uploadProgress.bytesUploaded,
+        totalBytes: uploadProgress.totalBytes,
+        percentComplete: uploadProgress.percentComplete,
+        status: uploadProgress.status,
+        speed: uploadProgress.speed, // bytes per second
+        remainingTime: uploadProgress.remainingTime, // seconds
+        startTime: uploadProgress.startTime,
+        lastUpdateTime: uploadProgress.lastUpdateTime,
+        completedTime: uploadProgress.completedTime
+      },
+      mediaInfo: mediaUpload ? {
+        fileName: mediaUpload.fileName,
+        fileType: mediaUpload.fileType,
+        title: mediaUpload.title,
+        fileUrl: mediaUpload.fileUrl
+      } : null
+    });
+
+  } catch (error) {
+    console.error('❌ Get upload progress error:', error);
+    res.status(500).json({ success: false, error: 'Failed to get upload progress: ' + error.message });
+  }
+});
+
+// ❌ POST /api/upload/cancel/:uploadId - Cancel upload
+app.post('/api/upload/cancel/:uploadId', authenticateToken, async (req, res) => {
+  try {
+    const { uploadId } = req.params;
+
+    const uploadProgress = await UploadProgress.findOne({ uploadId: uploadId });
+
+    if (!uploadProgress) {
+      return res.status(404).json({ success: false, error: 'Upload not found' });
+    }
+
+    // Verify ownership
+    if (uploadProgress.userId.toString() !== req.user._id.toString()) {
+      return res.status(403).json({ success: false, error: 'Access denied: you cannot cancel this upload' });
+    }
+
+    // Check if upload is already completed or cancelled
+    if (uploadProgress.status === 'completed') {
+      return res.status(400).json({ success: false, error: 'Cannot cancel a completed upload' });
+    }
+
+    if (uploadProgress.status === 'cancelled') {
+      return res.status(400).json({ success: false, error: 'Upload is already cancelled' });
+    }
+
+    // Update upload progress status
+    uploadProgress.status = 'cancelled';
+    uploadProgress.lastUpdateTime = new Date();
+    await uploadProgress.save();
+
+    // Update media upload status
+    const mediaUpload = await MediaUpload.findOne({ uploadId: uploadId });
+    if (mediaUpload) {
+      mediaUpload.status = 'cancelled';
+      mediaUpload.cancelledAt = new Date();
+      
+      // Delete file if it exists
+      if (fs.existsSync(mediaUpload.filePath)) {
+        try {
+          fs.unlinkSync(mediaUpload.filePath);
+          console.log('✅ File deleted:', mediaUpload.filePath);
+        } catch (unlinkError) {
+          console.error('❌ Error deleting file:', unlinkError);
+        }
+      }
+
+      await mediaUpload.save();
+    }
+
+    console.log('✅ Upload cancelled successfully:', uploadId);
+
+    res.json({
+      success: true,
+      message: 'Upload cancelled successfully',
+      uploadId: uploadId,
+      status: 'cancelled'
+    });
+
+  } catch (error) {
+    console.error('❌ Cancel upload error:', error);
+    res.status(500).json({ success: false, error: 'Failed to cancel upload: ' + error.message });
   }
 });
 
