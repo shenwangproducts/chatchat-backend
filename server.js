@@ -134,7 +134,8 @@ const mediaFilter = (req, file, cb) => {
     extensionAllowed
   });
 
-  if (mimeTypeAllowed && extensionAllowed) {
+  // Allow specific mime types OR generic binary if extension is valid
+  if ((mimeTypeAllowed || file.mimetype === 'application/octet-stream') && extensionAllowed) {
     return cb(null, true);
   }
   
@@ -585,7 +586,7 @@ const mediaUploadSchema = new mongoose.Schema({
     index: true
   },
   chatId: { type: mongoose.Schema.Types.ObjectId, ref: 'Chat', sparse: true },
-  groupId: { type: mongoose.Schema.Types.ObjectId, ref: 'Group', sparse: true },
+  groupId: { type: mongoose.Schema.Types.ObjectId, ref: 'Chat', sparse: true },
   uploadedAt: { type: Date, default: Date.now },
   completedAt: { type: Date, sparse: true },
   cancelledAt: { type: Date, sparse: true },
@@ -5918,13 +5919,6 @@ app.post('/api/upload/media', authenticateToken, mediaUpload.single('file'), asy
         fs.unlinkSync(req.file.path);
       }
       return res.status(400).json({ success: false, error: 'Invalid fileType. Allowed: video, photo, camera' });
-    }
-
-    // Check if uploads directory exists
-    const uploadsDir = 'uploads/media/';
-    if (!fs.existsSync(uploadsDir)) {
-      console.log('📁 Creating uploads/media directory');
-      fs.mkdirSync(uploadsDir, { recursive: true });
     }
 
     const uploadId = Date.now() + '-' + Math.round(Math.random() * 1E9);
