@@ -104,14 +104,43 @@ const mediaStorage = multer.diskStorage({
 });
 
 const mediaFilter = (req, file, cb) => {
-  const allowedTypes = /jpeg|jpg|png|gif|mp4|mov|webm|avi|mkv|flv|wmv/;
-  const mimetype = allowedTypes.test(file.mimetype);
-  const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
+  // Comprehensive MIME type validation
+  const allowedMimeTypes = [
+    'image/jpeg',
+    'image/jpg',
+    'image/png',
+    'image/gif',
+    'video/mp4',
+    'video/quicktime', // .mov files
+    'video/webm',
+    'video/x-msvideo', // .avi
+    'video/x-matroska', // .mkv
+    'video/x-flv', // .flv
+    'video/x-ms-wmv' // .wmv
+  ];
 
-  if (mimetype && extname) {
+  // Allowed file extensions
+  const allowedExtensions = ['jpeg', 'jpg', 'png', 'gif', 'mp4', 'mov', 'webm', 'avi', 'mkv', 'flv', 'wmv'];
+  const fileExtension = path.extname(file.originalname).toLowerCase().slice(1);
+
+  const mimeTypeAllowed = allowedMimeTypes.includes(file.mimetype);
+  const extensionAllowed = allowedExtensions.includes(fileExtension);
+
+  console.log('🔍 File validation:', {
+    originalName: file.originalname,
+    mimeType: file.mimetype,
+    extension: fileExtension,
+    mimeTypeAllowed,
+    extensionAllowed
+  });
+
+  if (mimeTypeAllowed && extensionAllowed) {
     return cb(null, true);
   }
-  cb(new Error('Media type not allowed: ' + file.mimetype));
+  
+  const error = `Media type not allowed - MIME: ${file.mimetype}, Extension: ${fileExtension}`;
+  console.error('❌ ' + error);
+  cb(new Error(error));
 };
 
 const mediaUpload = multer({ 
@@ -5859,26 +5888,54 @@ app.delete('/api/files/:fileId', authenticateToken, async (req, res) => {
 // 📤 POST /api/upload/media - Upload media content (video, photo, camera recording)
 app.post('/api/upload/media', authenticateToken, mediaUpload.single('file'), async (req, res) => {
   try {
+    console.log('🔄 Media upload started:', {
+      file: req.file ? req.file.originalname : 'NO FILE',
+      fileName: req.body.fileName,
+      fileType: req.body.fileType,
+      userId: req.user._id
+    });
+
     if (!req.file) {
+      console.error('❌ No file uploaded');
       return res.status(400).json({ success: false, error: 'No file uploaded' });
     }
 
     const { fileName, fileType, title, description, chatId, groupId } = req.body;
 
     if (!fileType || !title) {
+      console.error('❌ Missing required fields:', { fileType, title });
       // Clean up uploaded file
-      fs.unlinkSync(req.file.path);
+      if (fs.existsSync(req.file.path)) {
+        fs.unlinkSync(req.file.path);
+      }
       return res.status(400).json({ success: false, error: 'Missing required fields: fileType and title' });
     }
 
     // Validate fileType
     if (!['video', 'photo', 'camera'].includes(fileType)) {
-      fs.unlinkSync(req.file.path);
+      console.error('❌ Invalid fileType:', fileType);
+      if (fs.existsSync(req.file.path)) {
+        fs.unlinkSync(req.file.path);
+      }
       return res.status(400).json({ success: false, error: 'Invalid fileType. Allowed: video, photo, camera' });
+    }
+
+    // Check if uploads directory exists
+    const uploadsDir = 'uploads/media/';
+    if (!fs.existsSync(uploadsDir)) {
+      console.log('📁 Creating uploads/media directory');
+      fs.mkdirSync(uploadsDir, { recursive: true });
     }
 
     const uploadId = Date.now() + '-' + Math.round(Math.random() * 1E9);
     const fileUrl = `${req.protocol}://${req.get('host')}/uploads/media/${req.file.filename}`;
+
+    console.log('💾 Creating MediaUpload record:', {
+      uploadId,
+      fileName: fileName || req.file.originalname,
+      fileType,
+      fileSize: req.file.size
+    });
 
     // Create MediaUpload record
     const mediaUploadRecord = new MediaUpload({
@@ -5889,17 +5946,20 @@ app.post('/api/upload/media', authenticateToken, mediaUpload.single('file'), asy
       mimeType: req.file.mimetype,
       fileSize: req.file.size,
       title: title,
-      description: description,
+      description: description || '',
       filePath: req.file.path,
       fileUrl: fileUrl,
       status: 'completed',
-      chatId: chatId || null,
-      groupId: groupId || null,
+      chatId: chatId ? mongoose.Types.ObjectId.isValid(chatId) ? chatId : null : null,
+      groupId: groupId ? mongoose.Types.ObjectId.isValid(groupId) ? groupId : null : null,
       uploadProgress: 100,
       completedAt: new Date()
     });
 
     await mediaUploadRecord.save();
+    console.log('✅ MediaUpload record saved');
+
+    console.log('💾 Creating UploadProgress record:', { uploadId });
 
     // Create UploadProgress record
     const uploadProgressRecord = new UploadProgress({
@@ -5913,6 +5973,7 @@ app.post('/api/upload/media', authenticateToken, mediaUpload.single('file'), asy
     });
 
     await uploadProgressRecord.save();
+    console.log('✅ UploadProgress record saved');
 
     console.log('✅ Media uploaded successfully:', {
       uploadId: uploadId,
@@ -5934,17 +5995,42 @@ app.post('/api/upload/media', authenticateToken, mediaUpload.single('file'), asy
     });
 
   } catch (error) {
-    console.error('❌ Media upload error:', error);
+    console.error('❌ Media upload error:', {
+      message: error.message,
+      stack: error.stack,
+      name: error.name,
+      code: error.code,
+      fullError: JSON.stringify(error, null, 2)
+    });
+    
     // Clean up uploaded file on error
     if (req.file && fs.existsSync(req.file.path)) {
       try {
         fs.unlinkSync(req.file.path);
+        console.log('✅ Cleanup: File deleted');
       } catch (unlinkError) {
-        console.error('❌ Error deleting file:', unlinkError);
+        console.error('❌ Error deleting file:', unlinkError.message);
       }
     }
-    res.status(500).json({ success: false, error: 'Media upload failed: ' + error.message });
+    
+    res.status(500).json({ 
+      success: false, 
+      error: 'Media upload failed: ' + error.message,
+      details: error.code || error.name 
+    });
   }
+}, (err, req, res, next) => {
+  // Multer error handling middleware
+  console.error('❌ Multer error:', {
+    message: err.message,
+    code: err.code,
+    field: err.field
+  });
+  
+  res.status(400).json({
+    success: false,
+    error: 'File upload error: ' + err.message
+  });
 });
 
 // 📊 GET /api/upload/progress/:uploadId - Get upload progress
