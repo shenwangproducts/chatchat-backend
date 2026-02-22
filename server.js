@@ -43,17 +43,19 @@ app.use(helmet({
 // ✅ Rate Limiting
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // limit each IP to 100 requests per windowMs
-  message: {
-    success: false,
-    error: 'Too many requests from this IP, please try again later.'
+  limit: 100, // limit each IP to 100 requests per windowMs
+  handler: (req, res, next, options) => {
+    res.status(options.statusCode).json({
+      success: false,
+      error: 'Too many requests from this IP, please try again later.'
+    });
   }
 });
 app.use('/api/', limiter);
 
 // Middleware
 app.use(cors({
-  origin: process.env.CORS_ORIGIN || '*',
+  origin: true, // Reflect request origin to allow credentials safely
   credentials: true
 }));
 app.use(express.json({ limit: '10mb' }));
@@ -556,7 +558,7 @@ fileSchema.index({ filename: 1 });
 const File = mongoose.model('File', fileSchema);
 
 // =============================================
-// � MEDIA UPLOAD TRACKING SCHEMAS
+// 📂 MEDIA UPLOAD TRACKING SCHEMAS
 // =============================================
 
 // MediaUpload Schema - สำหรับติดตามการอัพโหลด media content (วิดีโอ, รูปภาพ, ฯลฯ)
@@ -585,8 +587,23 @@ const mediaUploadSchema = new mongoose.Schema({
     default: 'pending',
     index: true
   },
-  chatId: { type: mongoose.Schema.Types.ObjectId, ref: 'Chat', sparse: true },
-  groupId: { type: mongoose.Schema.Types.ObjectId, ref: 'Chat', sparse: true },
+  // ✅ ส่วนที่เพิ่มใหม่สำหรับ Post Settings
+  visibility: {
+    type: String,
+    enum: ['public', 'friends', 'private'],
+    default: 'public'
+  },
+  commentPermission: {
+    type: String,
+    enum: ['public', 'friends_followers', 'private'],
+    default: 'public'
+  },
+  shareToStory: { type: Boolean, default: false },
+  shareToGroups: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Chat' }],
+  scheduledTime: { type: Date, sparse: true },
+  collaborators: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
+  // ------------------------------------
+  
   uploadedAt: { type: Date, default: Date.now },
   completedAt: { type: Date, sparse: true },
   cancelledAt: { type: Date, sparse: true },
@@ -640,6 +657,45 @@ uploadProgressSchema.index({ uploadId: 1 });
 uploadProgressSchema.index({ userId: 1, uploadId: 1 });
 
 const UploadProgress = mongoose.model('UploadProgress', uploadProgressSchema);
+
+// Story Schema
+const storySchema = new mongoose.Schema({
+  userId: { 
+    type: mongoose.Schema.Types.ObjectId, 
+    ref: 'User', 
+    required: true,
+    index: true 
+  },
+  type: { 
+    type: String, 
+    enum: ['text', 'image', 'video'], 
+    default: 'text' 
+  },
+  mediaUrl: String,
+  thumbnailUrl: String,
+  backgroundColor: { type: String, default: '#000000' },
+  textItems: [mongoose.Schema.Types.Mixed],
+  stickers: [mongoose.Schema.Types.Mixed],
+  visibility: {
+    type: String,
+    enum: ['public', 'friends', 'private', 'specific'],
+    default: 'public'
+  },
+  specificViewers: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
+  allowComments: { type: Boolean, default: true },
+  viewers: [{
+    userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    viewedAt: { type: Date, default: Date.now }
+  }],
+  createdAt: { type: Date, default: Date.now },
+  expiresAt: { type: Date, required: true, index: true }
+});
+
+// Auto-delete stories after expiration (TTL)
+storySchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
+storySchema.index({ userId: 1, createdAt: -1 });
+
+const Story = mongoose.model('Story', storySchema);
 
 // =============================================
 // �📨 NOTIFICATION SYSTEM
@@ -1191,6 +1247,11 @@ const createSystemNotification = async (userId, systemData) => {
 // =============================================
 // 🔧 UTILITY FUNCTIONS
 // =============================================
+
+const escapeRegex = (text) => {
+  // Escape special characters for MongoDB regex to prevent ReDoS and Injection
+  return text.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, "\\$&");
+};
 
 const _getTimeAgo = (date) => {
   const now = new Date();
@@ -3324,14 +3385,14 @@ app.get('/api/users/search', authenticateToken, async (req, res) => {
       query: query
     });
 
-    if (!query || query.trim().length < 2) {
+    if (!query || typeof query !== 'string' || query.trim().length < 2) {
       return res.status(400).json({
         success: false,
         error: 'Search query must be at least 2 characters'
       });
     }
 
-    const searchTerm = query.trim().toLowerCase();
+    const searchTerm = escapeRegex(query.trim());
 
     const users = await User.find({
       _id: { $ne: req.user._id },
@@ -4300,11 +4361,12 @@ app.post('/api/chats/:chatId/typing', authenticateToken, async (req, res) => {
 app.get('/api/search', authenticateToken, async (req, res) => {
   try {
     const { q, types } = req.query;
-    if (!q) return res.status(400).json({ success: false, error: 'Query required' });
+    if (!q || typeof q !== 'string') return res.status(400).json({ success: false, error: 'Query required' });
 
+    const searchTerm = escapeRegex(q.trim());
     // Basic search implementation - expand as needed
-    const users = await User.find({ username: { $regex: q, $options: 'i' } }).limit(5);
-    const chats = await Chat.find({ title: { $regex: q, $options: 'i' }, participants: req.user._id }).limit(5);
+    const users = await User.find({ username: { $regex: searchTerm, $options: 'i' } }).limit(5);
+    const chats = await Chat.find({ title: { $regex: searchTerm, $options: 'i' }, participants: req.user._id }).limit(5);
 
     res.json({ success: true, results: { users, chats } });
   } catch (error) {
@@ -4622,7 +4684,7 @@ app.get('/api/notifications/new', authenticateToken, async (req, res) => {
     const { since } = req.query;
     const query = { userId: req.user._id, isRead: false };
     
-    if (since) {
+    if (since && typeof since === 'string') {
       query.createdAt = { $gt: new Date(since) };
     }
 
@@ -4932,14 +4994,12 @@ app.get('/api/user/notification-settings', authenticateToken, async (req, res) =
   }
 });
 
-// 🔥 เพิ่มโค้ดนี้ในไฟล์ server.js ของคุณ
-
 // =============================================
 // 📱 FCM TOKEN MANAGEMENT API ROUTES
 // =============================================
 
-// 🔥 Update FCM Token สำหรับ Push Notifications
-app.put('/api/user/fcm-token', authenticateToken, [
+// ✅ แก้ไข: middleware validation ต้องประกาศเป็น array และ function
+const fcmTokenValidation = [
   body('fcmToken')
     .notEmpty()
     .withMessage('FCM token is required')
@@ -4949,7 +5009,10 @@ app.put('/api/user/fcm-token', authenticateToken, [
     .optional()
     .isIn(['android', 'ios', 'web'])
     .withMessage('Platform must be android, ios, or web')
-], async (req, res) => {
+];
+
+// ✅ แยก handler function ออกมา
+const fcmTokenUpdateHandler = async (req, res) => {
   try {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
@@ -4974,12 +5037,7 @@ app.put('/api/user/fcm-token', authenticateToken, [
     req.user.updatedAt = new Date();
     await req.user.save();
 
-    console.log('✅ FCM token updated successfully:', {
-      userId: req.user._id,
-      platform: platform,
-      tokenUpdated: true,
-      updatedAt: req.user.updatedAt
-    });
+    console.log('✅ FCM token updated successfully for user:', req.user._id);
 
     // ✅ สร้างการแจ้งเตือนระบบ
     await createSystemNotification(req.user._id, {
@@ -5007,20 +5065,25 @@ app.put('/api/user/fcm-token', authenticateToken, [
       error: 'Failed to update FCM token: ' + error.message
     });
   }
-});
+};
+
+// 🔥 Update FCM Token สำหรับ Push Notifications
+app.put('/api/user/fcm-token', authenticateToken, fcmTokenValidation, fcmTokenUpdateHandler);
 
 // 🔥 POST alias for FCM Token update (Compatibility)
-app.post('/api/user/fcm-token', authenticateToken, async (req, res) => {
-  // Reuse the logic from PUT
-  const { fcmToken, platform = 'android' } = req.body;
-  try {
-    req.user.fcmToken = fcmToken;
-    req.user.updatedAt = new Date();
-    await req.user.save();
-    res.json({ success: true, message: 'FCM token updated successfully' });
-  } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
-  }
+app.post('/api/user/fcm-token', authenticateToken, fcmTokenValidation, fcmTokenUpdateHandler);
+
+// 🔥 Aliases for FCM Token registration for client compatibility
+const fcmTokenAliases = [
+  '/api/user/device-token',
+  '/api/notifications/register',
+  '/api/fcm/register',
+  '/api/device/register'
+];
+
+fcmTokenAliases.forEach(alias => {
+  app.put(alias, authenticateToken, fcmTokenValidation, fcmTokenUpdateHandler);
+  app.post(alias, authenticateToken, fcmTokenValidation, fcmTokenUpdateHandler);
 });
 
 // 🔍 Get FCM Token Status
@@ -5886,6 +5949,73 @@ app.delete('/api/files/:fileId', authenticateToken, async (req, res) => {
 // 📤 MEDIA UPLOAD ENDPOINTS
 // =============================================
 
+// 🎥 Get Videos Feed
+app.get('/api/videos/feed', authenticateToken, async (req, res) => {
+  try {
+    const { page = 1, limit = 10 } = req.query;
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+
+    console.log('🎥 Fetching videos feed for user:', req.user._id, { page, limit });
+
+    // Query: Completed videos that are public OR owned by the user
+    const query = {
+      status: 'completed',
+      mimeType: { $regex: /^video\// },
+      $or: [
+        { visibility: 'public' },
+        { userId: req.user._id }
+      ]
+    };
+
+    const videos = await MediaUpload.find(query)
+      .populate('userId', 'username profilePicture userId')
+      .sort({ uploadedAt: -1 })
+      .skip(skip)
+      .limit(parseInt(limit))
+      .lean();
+
+    const total = await MediaUpload.countDocuments(query);
+
+    const formattedVideos = videos.map(video => ({
+      id: video.uploadId,
+      _id: video._id,
+      title: video.title,
+      description: video.description,
+      videoUrl: video.fileUrl,
+      thumbnailUrl: video.thumbnailUrl,
+      duration: video.duration,
+      fileSize: video.fileSize,
+      mimeType: video.mimeType,
+      uploadedAt: video.uploadedAt,
+      visibility: video.visibility,
+      uploader: video.userId ? {
+        id: video.userId.userId || video.userId._id,
+        username: video.userId.username,
+        profilePicture: video.userId.profilePicture
+      } : null,
+      isMine: video.userId && video.userId._id.toString() === req.user._id.toString()
+    }));
+
+    res.json({
+      success: true,
+      videos: formattedVideos,
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total,
+        pages: Math.ceil(total / parseInt(limit))
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Get videos feed error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch videos feed'
+    });
+  }
+});
+
 // 📤 POST /api/upload/media - Upload media content (video, photo, camera recording)
 app.post('/api/upload/media', authenticateToken, mediaUpload.single('file'), async (req, res) => {
   try {
@@ -5901,7 +6031,19 @@ app.post('/api/upload/media', authenticateToken, mediaUpload.single('file'), asy
       return res.status(400).json({ success: false, error: 'No file uploaded' });
     }
 
-    const { fileName, fileType, title, description, chatId, groupId } = req.body;
+    // ✅ รับค่าพารามิเตอร์ใหม่ๆ จาก Client
+    const { 
+      fileName, 
+      fileType, 
+      title, 
+      description, 
+      visibility,
+      commentPermission,
+      shareToStory,
+      shareToGroups, // JSON string
+      scheduledTime,
+      collaborators // JSON string
+    } = req.body;
 
     if (!fileType || !title) {
       console.error('❌ Missing required fields:', { fileType, title });
@@ -5931,6 +6073,21 @@ app.post('/api/upload/media', authenticateToken, mediaUpload.single('file'), asy
       fileSize: req.file.size
     });
 
+    // ✅ แปลงข้อมูล JSON string กลับเป็น Array (เพราะส่งมาเป็น FormData)
+    let parsedGroups = [];
+    if (shareToGroups) {
+      try {
+        parsedGroups = JSON.parse(shareToGroups);
+      } catch(e) { console.error('Error parsing shareToGroups:', e); }
+    }
+
+    let parsedCollaborators = [];
+    if (collaborators) {
+      try {
+        parsedCollaborators = JSON.parse(collaborators);
+      } catch(e) { console.error('Error parsing collaborators:', e); }
+    }
+
     // Create MediaUpload record
     const mediaUploadRecord = new MediaUpload({
       uploadId: uploadId,
@@ -5944,8 +6101,15 @@ app.post('/api/upload/media', authenticateToken, mediaUpload.single('file'), asy
       filePath: req.file.path,
       fileUrl: fileUrl,
       status: 'completed',
-      chatId: chatId ? mongoose.Types.ObjectId.isValid(chatId) ? chatId : null : null,
-      groupId: groupId ? mongoose.Types.ObjectId.isValid(groupId) ? groupId : null : null,
+      
+      // ✅ บันทึกค่า Settings ลงฐานข้อมูล
+      visibility: visibility || 'public',
+      commentPermission: commentPermission || 'public',
+      shareToStory: shareToStory === 'true', // ค่าจาก form-data เป็น string
+      shareToGroups: parsedGroups.filter(id => mongoose.Types.ObjectId.isValid(id)),
+      scheduledTime: scheduledTime ? new Date(scheduledTime) : null,
+      collaborators: parsedCollaborators.filter(id => mongoose.Types.ObjectId.isValid(id)),
+      
       uploadProgress: 100,
       completedAt: new Date()
     });
@@ -6134,6 +6298,189 @@ app.post('/api/upload/cancel/:uploadId', authenticateToken, async (req, res) => 
   } catch (error) {
     console.error('❌ Cancel upload error:', error);
     res.status(500).json({ success: false, error: 'Failed to cancel upload: ' + error.message });
+  }
+});
+
+// =============================================
+// 📖 STORY ENDPOINTS
+// =============================================
+
+// Create Story
+app.post('/api/stories', authenticateToken, async (req, res) => {
+  try {
+    const { 
+      type = 'text', 
+      backgroundColor, 
+      textItems, 
+      stickers, 
+      visibility = 'public', 
+      specificViewers, 
+      allowComments = true, 
+      mediaUrl,
+      thumbnailUrl
+    } = req.body;
+
+    console.log('📝 Creating story:', { type, userId: req.user._id });
+
+    const expiresAt = new Date();
+    expiresAt.setHours(expiresAt.getHours() + 24); // Expires in 24 hours
+
+    const newStory = new Story({
+      userId: req.user._id,
+      type,
+      backgroundColor,
+      textItems,
+      stickers,
+      visibility,
+      specificViewers,
+      allowComments,
+      mediaUrl,
+      thumbnailUrl,
+      expiresAt
+    });
+
+    await newStory.save();
+    await newStory.populate('userId', 'username profilePicture userId');
+
+    res.status(201).json({
+      success: true,
+      story: {
+        id: newStory._id,
+        ...newStory.toObject()
+      }
+    });
+  } catch (error) {
+    console.error('❌ Create story error:', error);
+    res.status(500).json({ success: false, error: 'Failed to create story' });
+  }
+});
+
+// Get Stories Feed (Friends + Self)
+app.get('/api/stories/feed', authenticateToken, async (req, res) => {
+  try {
+    console.log('📱 Getting stories feed for:', req.user._id);
+
+    // 1. Get friends
+    const friendships = await FriendRequest.find({
+      $or: [
+        { fromUser: req.user._id, status: 'accepted' },
+        { toUser: req.user._id, status: 'accepted' }
+      ]
+    });
+
+    const friendIds = friendships.map(f => 
+      f.fromUser.toString() === req.user._id.toString() ? f.toUser : f.fromUser
+    );
+
+    // Include self
+    const targetIds = [...friendIds, req.user._id];
+
+    // 2. Find active stories
+    const stories = await Story.find({
+      userId: { $in: targetIds },
+      expiresAt: { $gt: new Date() }
+    })
+    .populate('userId', 'username profilePicture userId')
+    .sort({ createdAt: 1 }) // Oldest first for stories usually, or grouped by user
+    .lean();
+
+    // Filter by visibility
+    const visibleStories = stories.filter(story => {
+      if (story.userId._id.toString() === req.user._id.toString()) return true;
+      
+      if (story.visibility === 'public') return true;
+      if (story.visibility === 'friends') return true; // We already filtered by friendIds
+      if (story.visibility === 'specific') {
+        return story.specificViewers.some(id => id.toString() === req.user._id.toString());
+      }
+      return false;
+    });
+
+    // Format for response
+    const formattedStories = visibleStories.map(story => ({
+      id: story._id,
+      type: story.type,
+      mediaUrl: story.mediaUrl,
+      thumbnailUrl: story.thumbnailUrl,
+      backgroundColor: story.backgroundColor,
+      textItems: story.textItems,
+      stickers: story.stickers,
+      createdAt: story.createdAt,
+      expiresAt: story.expiresAt,
+      isViewed: story.viewers && story.viewers.some(v => v.userId.toString() === req.user._id.toString()),
+      user: {
+        id: story.userId.userId || story.userId._id,
+        username: story.userId.username,
+        profilePicture: story.userId.profilePicture
+      }
+    }));
+
+    res.json({ success: true, stories: formattedStories });
+  } catch (error) {
+    console.error('❌ Get stories feed error:', error);
+    res.status(500).json({ success: false, error: 'Failed to get stories feed' });
+  }
+});
+
+// Get My Stories
+app.get('/api/stories/me', authenticateToken, async (req, res) => {
+  try {
+    const stories = await Story.find({
+      userId: req.user._id,
+      expiresAt: { $gt: new Date() }
+    })
+    .populate('userId', 'username profilePicture userId')
+    .sort({ createdAt: -1 });
+
+    const formattedStories = stories.map(story => ({
+      id: story._id,
+      type: story.type,
+      mediaUrl: story.mediaUrl,
+      thumbnailUrl: story.thumbnailUrl,
+      backgroundColor: story.backgroundColor,
+      textItems: story.textItems,
+      stickers: story.stickers,
+      createdAt: story.createdAt,
+      expiresAt: story.expiresAt,
+      viewersCount: story.viewers.length,
+      user: {
+        id: story.userId.userId || story.userId._id,
+        username: story.userId.username,
+        profilePicture: story.userId.profilePicture
+      }
+    }));
+
+    res.json({ success: true, stories: formattedStories });
+  } catch (error) {
+    console.error('❌ Get my stories error:', error);
+    res.status(500).json({ success: false, error: 'Failed to get my stories' });
+  }
+});
+
+// Delete Story
+app.delete('/api/stories/:id', authenticateToken, async (req, res) => {
+  try {
+    const story = await Story.findOne({ _id: req.params.id, userId: req.user._id });
+    if (!story) return res.status(404).json({ success: false, error: 'Story not found' });
+
+    await Story.deleteOne({ _id: req.params.id });
+    res.json({ success: true, message: 'Story deleted' });
+  } catch (error) {
+    console.error('❌ Delete story error:', error);
+    res.status(500).json({ success: false, error: 'Failed to delete story' });
+  }
+});
+
+// View Story
+app.post('/api/stories/:id/view', authenticateToken, async (req, res) => {
+  try {
+    await Story.findByIdAndUpdate(req.params.id, {
+      $addToSet: { viewers: { userId: req.user._id, viewedAt: new Date() } }
+    });
+    res.json({ success: true });
+  } catch (error) {
+    console.error('❌ View story error:', error);
+    res.status(500).json({ success: false, error: 'Failed to mark story as viewed' });
   }
 });
 
