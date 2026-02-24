@@ -5979,13 +5979,16 @@ app.get('/api/videos/feed', authenticateToken, async (req, res) => {
 
     const total = await MediaUpload.countDocuments(query);
 
+    // ✅ Set caching headers to prevent client-side caching of the feed
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+
     const formattedVideos = videos.map(video => ({
       id: video.uploadId,
       _id: video._id,
       title: video.title,
       description: video.description,
-      videoUrl: video.fileUrl,
-      thumbnailUrl: video.thumbnailUrl,
+      videoUrl: video.fileUrl || null,
+      thumbnailUrl: video.thumbnailUrl || null,
       duration: video.duration,
       fileSize: video.fileSize,
       mimeType: video.mimeType,
