@@ -222,7 +222,8 @@ const userSchema = new mongoose.Schema({
     systemNotifications: { type: Boolean, default: true },
     soundEnabled: { type: Boolean, default: true },
     vibrationEnabled: { type: Boolean, default: true }
-  }
+  },
+  blockedUsers: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }]
 });
 
 userSchema.index({ email: 1 });
@@ -609,7 +610,9 @@ const mediaUploadSchema = new mongoose.Schema({
   cancelledAt: { type: Date, sparse: true },
   errorMessage: { type: String },
   retryCount: { type: Number, default: 0 },
-  metadata: { type: Map, of: mongoose.Schema.Types.Mixed }
+  metadata: { type: Map, of: mongoose.Schema.Types.Mixed },
+  likesCount: { type: Number, default: 0 },
+  sharesCount: { type: Number, default: 0 }
 });
 
 mediaUploadSchema.index({ userId: 1, uploadedAt: -1 });
