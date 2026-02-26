@@ -11,7 +11,7 @@ const path = require('path');
 const fs = require('fs');
 require('dotenv').config();
 const { v2: cloudinary } = require('cloudinary');
-const { CloudinaryStorage } = require('multer-storage-cloudinary');
+const cloudinaryStorage = require('multer-storage-cloudinary');
 
 const admin = require('firebase-admin');
 
@@ -103,7 +103,7 @@ const upload = multer({
 });
 
 // ✅ Configure Multer for media uploads (videos, photos) - Higher file size limit
-const mediaStorage = new CloudinaryStorage({
+const mediaStorage = cloudinaryStorage({
   cloudinary: cloudinary,
   params: {
     folder: 'chatchat_media', // Folder name on Cloudinary
