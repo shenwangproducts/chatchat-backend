@@ -10,6 +10,8 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 require('dotenv').config();
+const { v2: cloudinary } = require('cloudinary');
+const { CloudinaryStorage } = require('multer-storage-cloudinary');
 
 const admin = require('firebase-admin');
 
@@ -19,6 +21,14 @@ const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-in-producti
 
 // ✅ Trust Proxy (Required for Render/Heroku behind load balancer)
 app.set('trust proxy', 1);
+
+// Cloudinary Configuration
+// 💡 For production, move these to your .env file for security
+cloudinary.config({
+  cloud_name: 'dbc9alp0s',
+  api_key: '374454288622437',
+  api_secret: 'cYLw5DFLLQOYvRCwBMKUuS5v7wA'
+});
 
 // Firebase initialization
 if (process.env.FIREBASE_SERVICE_ACCOUNT_KEY) {
@@ -93,16 +103,17 @@ const upload = multer({
 });
 
 // ✅ Configure Multer for media uploads (videos, photos) - Higher file size limit
-const mediaStorage = multer.diskStorage({
-  destination: function (req, file, cb) {
-    const uploadDir = 'uploads/media/';
-    if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
-    cb(null, uploadDir);
+const mediaStorage = new CloudinaryStorage({
+  cloudinary: cloudinary,
+  params: {
+    folder: 'chatchat_media', // Folder name on Cloudinary
+    resource_type: 'auto', // Automatically detect if it's an image or video
+    public_id: (req, file) => {
+      // Create a unique public_id from the original file name
+      const fileName = path.parse(file.originalname).name.replace(/[^a-zA-Z0-9]/g, '_');
+      return `${fileName}-${Date.now()}`;
+    },
   },
-  filename: function (req, file, cb) {
-    const uploadId = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    cb(null, uploadId + path.extname(file.originalname));
-  }
 });
 
 const mediaFilter = (req, file, cb) => {
@@ -571,6 +582,7 @@ const mediaUploadSchema = new mongoose.Schema({
     required: true,
     index: true 
   },
+  publicId: { type: String }, // ✅ Cloudinary public_id
   fileName: { type: String, required: true },
   fileType: { type: String, required: true }, // 'video', 'photo', 'camera'
   mimeType: { type: String, required: true },
@@ -6039,13 +6051,19 @@ app.delete('/api/videos/:videoId', authenticateToken, async (req, res) => {
       return res.status(403).json({ success: false, error: 'You are not authorized to delete this video' });
     }
 
-    // Delete the physical file from storage
-    if (media.filePath && fs.existsSync(media.filePath)) {
+    // ✅ Delete from Cloudinary if publicId exists
+    if (media.publicId) {
+      const resourceType = media.mimeType.startsWith('video') ? 'video' : 'image';
+      await cloudinary.uploader.destroy(media.publicId, { resource_type: resourceType });
+      console.log('✅ File deleted from Cloudinary:', media.publicId);
+    } 
+    // Fallback for old, locally stored files
+    else if (media.filePath && fs.existsSync(media.filePath)) {
       fs.unlink(media.filePath, (err) => {
         if (err) {
-          console.error('❌ Error deleting video file:', err);
+          console.error('❌ Error deleting local video file:', err);
         } else {
-          console.log('✅ Video file deleted from disk:', media.filePath);
+          console.log('✅ Local video file deleted from disk:', media.filePath);
         }
       });
     }
@@ -6091,9 +6109,9 @@ app.post('/api/upload/media', authenticateToken, mediaUpload.single('file'), asy
 
     if (!fileType || !title) {
       console.error('❌ Missing required fields:', { fileType, title });
-      // Clean up uploaded file
-      if (fs.existsSync(req.file.path)) {
-        fs.unlinkSync(req.file.path);
+      // ✅ Clean up from Cloudinary if required fields are missing
+      if (req.file) {
+        await cloudinary.uploader.destroy(req.file.filename);
       }
       return res.status(400).json({ success: false, error: 'Missing required fields: fileType and title' });
     }
@@ -6101,14 +6119,37 @@ app.post('/api/upload/media', authenticateToken, mediaUpload.single('file'), asy
     // Validate fileType
     if (!['video', 'photo', 'camera'].includes(fileType)) {
       console.error('❌ Invalid fileType:', fileType);
-      if (fs.existsSync(req.file.path)) {
-        fs.unlinkSync(req.file.path);
+      if (req.file) {
+        await cloudinary.uploader.destroy(req.file.filename);
       }
       return res.status(400).json({ success: false, error: 'Invalid fileType. Allowed: video, photo, camera' });
     }
 
     const uploadId = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    const fileUrl = `${req.protocol}://${req.get('host')}/uploads/media/${req.file.filename}`;
+    
+    // ✅ Get URLs and public_id from Cloudinary response
+    const fileUrl = req.file.path;
+    const publicId = req.file.filename;
+
+    // ✅ Generate a thumbnail URL
+    let thumbnailUrl = null;
+    if (fileType === 'video' || fileType === 'camera') {
+        thumbnailUrl = cloudinary.url(publicId, {
+            resource_type: 'video',
+            crop: 'thumb',
+            width: 400,
+            height: 400,
+            gravity: 'center',
+            format: 'jpg'
+        });
+    } else { // photo
+        thumbnailUrl = cloudinary.url(publicId, {
+            width: 400,
+            height: 400,
+            crop: 'fill',
+            gravity: 'auto'
+        });
+    }
 
     console.log('💾 Creating MediaUpload record:', {
       uploadId,
@@ -6136,14 +6177,16 @@ app.post('/api/upload/media', authenticateToken, mediaUpload.single('file'), asy
     const mediaUploadRecord = new MediaUpload({
       uploadId: uploadId,
       userId: req.user._id,
+      publicId: publicId, // ✅ Save Cloudinary public_id
       fileName: fileName || req.file.originalname,
       fileType: fileType,
       mimeType: req.file.mimetype,
       fileSize: req.file.size,
       title: title,
       description: description || '',
-      filePath: req.file.path,
+      filePath: req.file.path, // This is now the Cloudinary URL
       fileUrl: fileUrl,
+      thumbnailUrl: thumbnailUrl, // ✅ Save thumbnail URL
       status: 'completed',
       
       // ✅ บันทึกค่า Settings ลงฐานข้อมูล
@@ -6190,6 +6233,7 @@ app.post('/api/upload/media', authenticateToken, mediaUpload.single('file'), asy
       message: 'Media uploaded successfully',
       uploadId: uploadId,
       fileUrl: fileUrl,
+      thumbnailUrl: thumbnailUrl,
       fileName: fileName || req.file.originalname,
       fileType: fileType,
       fileSize: req.file.size,
@@ -6205,13 +6249,13 @@ app.post('/api/upload/media', authenticateToken, mediaUpload.single('file'), asy
       fullError: JSON.stringify(error, null, 2)
     });
     
-    // Clean up uploaded file on error
-    if (req.file && fs.existsSync(req.file.path)) {
+    // ✅ Clean up uploaded file from Cloudinary on error
+    if (req.file) {
       try {
-        fs.unlinkSync(req.file.path);
-        console.log('✅ Cleanup: File deleted');
-      } catch (unlinkError) {
-        console.error('❌ Error deleting file:', unlinkError.message);
+        await cloudinary.uploader.destroy(req.file.filename);
+        console.log('✅ Cleanup: File deleted from Cloudinary');
+      } catch (destroyError) {
+        console.error('❌ Error deleting file from Cloudinary:', destroyError.message);
       }
     }
     
