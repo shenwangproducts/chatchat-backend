@@ -12,6 +12,7 @@ const fs = require('fs');
 require('dotenv').config();
 const { v2: cloudinary } = require('cloudinary');
 const cloudinaryStorage = require('multer-storage-cloudinary');
+const crypto = require('crypto');
 
 const admin = require('firebase-admin');
 
@@ -5957,6 +5958,41 @@ app.delete('/api/files/:fileId', authenticateToken, async (req, res) => {
   } catch (error) {
     console.error('❌ Delete file error:', error);
     res.status(500).json({ success: false, error: 'Failed to delete file' });
+  }
+});
+
+// =============================================
+// ✍️ CLOUDINARY SIGNATURE ENDPOINT
+// =============================================
+app.post('/api/cloudinary/signature', authenticateToken, (req, res) => {
+  try {
+    const timestamp = Math.round((new Date).getTime() / 1000);
+    
+    // ✅ ดึงค่าจาก .env
+    const apiSecret = process.env.CLOUDINARY_API_SECRET;
+    if (!apiSecret) {
+      console.error('❌ CLOUDINARY_API_SECRET is not defined!');
+      return res.status(500).json({ success: false, error: 'Cloudinary not configured' });
+    }
+
+    // ✅ สร้าง string ที่จะใช้ในการ sign
+    // ต้องเรียงตามตัวอักษร: folder มาก่อน timestamp
+    const stringToSign = `folder=chatchat_media&timestamp=${timestamp}${apiSecret}`;
+    
+    // ✅ สร้าง signature ด้วย SHA-1
+    const signature = crypto.createHash('sha1').update(stringToSign).digest('hex');
+
+    console.log('✍️ Generated Cloudinary signature for user:', req.user._id);
+
+    res.json({
+      success: true,
+      signature: signature,
+      timestamp: timestamp
+    });
+
+  } catch (error) {
+    console.error('❌ Error generating Cloudinary signature:', error);
+    res.status(500).json({ success: false, error: 'Failed to generate signature' });
   }
 });
 
