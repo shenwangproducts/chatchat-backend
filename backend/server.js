@@ -6022,6 +6022,44 @@ app.get('/api/videos/feed', authenticateToken, async (req, res) => {
   }
 });
 
+// 🗑️ Delete Video
+app.delete('/api/videos/:videoId', authenticateToken, async (req, res) => {
+  try {
+    const { videoId } = req.params;
+    console.log('🗑️ Deleting video:', { videoId, userId: req.user._id });
+
+    const media = await MediaUpload.findOne({ uploadId: videoId });
+
+    if (!media) {
+      return res.status(404).json({ success: false, error: 'Video not found' });
+    }
+
+    // Check ownership (or if user is admin)
+    if (media.userId.toString() !== req.user._id.toString() && req.user.userType !== 'admin') {
+      return res.status(403).json({ success: false, error: 'You are not authorized to delete this video' });
+    }
+
+    // Delete the physical file from storage
+    if (media.filePath && fs.existsSync(media.filePath)) {
+      fs.unlink(media.filePath, (err) => {
+        if (err) {
+          console.error('❌ Error deleting video file:', err);
+        } else {
+          console.log('✅ Video file deleted from disk:', media.filePath);
+        }
+      });
+    }
+
+    await MediaUpload.deleteOne({ uploadId: videoId });
+    await UploadProgress.deleteOne({ uploadId: videoId });
+
+    res.json({ success: true, message: 'Video deleted successfully' });
+  } catch (error) {
+    console.error('❌ Delete video error:', error);
+    res.status(500).json({ success: false, error: 'Failed to delete video' });
+  }
+});
+
 // 📤 POST /api/upload/media - Upload media content (video, photo, camera recording)
 app.post('/api/upload/media', authenticateToken, mediaUpload.single('file'), async (req, res) => {
   try {
