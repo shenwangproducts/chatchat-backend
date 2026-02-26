@@ -25,9 +25,9 @@ app.set('trust proxy', 1);
 // Cloudinary Configuration
 // 💡 For production, move these to your .env file for security
 cloudinary.config({
-  cloud_name: 'dbc9alp0s',
-  api_key: '374454288622437',
-  api_secret: 'cYLw5DFLLQOYvRCwBMKUuS5v7wA'
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET
 });
 
 // Firebase initialization
