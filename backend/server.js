@@ -6000,6 +6000,90 @@ app.post('/api/cloudinary/signature', authenticateToken, (req, res) => {
 // 📤 MEDIA UPLOAD ENDPOINTS
 // =============================================
 
+// 💾 POST /api/media/metadata - Save metadata after direct upload (เพิ่มใหม่)
+app.post('/api/media/metadata', authenticateToken, async (req, res) => {
+  try {
+    const { 
+      uploadId,
+      publicId,
+      fileName,
+      fileType,
+      mimeType,
+      fileSize,
+      title,
+      description,
+      fileUrl,
+      thumbnailUrl,
+      duration,
+      visibility,
+      commentPermission,
+      shareToStory,
+      shareToGroups,
+      scheduledTime,
+      collaborators
+    } = req.body;
+
+    console.log('💾 Saving metadata for direct upload:', { uploadId, title });
+
+    // ✅ Optimize Video URL: บังคับใช้ H.264 และ 720p สำหรับวิดีโอ
+    let finalFileUrl = fileUrl;
+    if ((fileType === 'video' || fileType === 'camera') && fileUrl) {
+       // ถ้าเป็น Cloudinary URL และยังไม่มีการปรับแต่ง
+       if (fileUrl.includes('cloudinary.com') && fileUrl.includes('/upload/') && !fileUrl.includes('q_auto,vc_h264')) {
+          const parts = fileUrl.split('/upload/');
+          // แทรกพารามิเตอร์ปรับแต่งคุณภาพ
+          finalFileUrl = `${parts[0]}/upload/q_auto,vc_h264,w_720,c_limit/${parts[1]}`;
+       }
+    }
+
+    const mediaUploadRecord = new MediaUpload({
+      uploadId,
+      userId: req.user._id,
+      publicId,
+      fileName,
+      fileType,
+      mimeType: mimeType || 'application/octet-stream',
+      fileSize,
+      title,
+      description: description || '',
+      filePath: finalFileUrl, // ใช้ URL ที่ปรับแต่งแล้ว
+      fileUrl: finalFileUrl,
+      thumbnailUrl,
+      duration,
+      status: 'completed',
+      visibility: visibility || 'public',
+      commentPermission: commentPermission || 'public',
+      shareToStory: shareToStory === true || shareToStory === 'true',
+      shareToGroups: shareToGroups ? (typeof shareToGroups === 'string' ? JSON.parse(shareToGroups) : shareToGroups) : [],
+      scheduledTime: scheduledTime ? new Date(scheduledTime) : null,
+      collaborators: collaborators ? (typeof collaborators === 'string' ? JSON.parse(collaborators) : collaborators) : [],
+      uploadProgress: 100,
+      completedAt: new Date()
+    });
+
+    await mediaUploadRecord.save();
+
+    // สร้าง UploadProgress record เพื่อความสมบูรณ์ของข้อมูล
+    const uploadProgressRecord = new UploadProgress({
+      uploadId,
+      userId: req.user._id,
+      bytesUploaded: fileSize,
+      totalBytes: fileSize,
+      percentComplete: 100,
+      status: 'completed',
+      completedTime: new Date()
+    });
+    await uploadProgressRecord.save();
+
+    console.log('✅ Metadata saved successfully');
+    res.status(201).json({ success: true, data: mediaUploadRecord });
+
+  } catch (error) {
+    console.error('❌ Save metadata error:', error);
+    res.status(500).json({ success: false, error: 'Failed to save metadata: ' + error.message });
+  }
+});
+
 // 🎥 Get Videos Feed
 app.get('/api/videos/feed', authenticateToken, async (req, res) => {
   try {
@@ -6167,6 +6251,15 @@ app.post('/api/upload/media', authenticateToken, mediaUpload.single('file'), asy
     const fileUrl = req.file.path;
     const publicId = req.file.filename;
 
+    // ✅ Optimize Video URL (เพิ่มส่วนนี้): บังคับใช้ H.264 และ 720p
+    let finalFileUrl = fileUrl;
+    if (fileType === 'video' || fileType === 'camera') {
+       if (fileUrl.includes('cloudinary.com') && fileUrl.includes('/upload/')) {
+          const parts = fileUrl.split('/upload/');
+          finalFileUrl = `${parts[0]}/upload/q_auto,vc_h264,w_720,c_limit/${parts[1]}`;
+       }
+    }
+
     // ✅ Generate a thumbnail URL
     let thumbnailUrl = null;
     if (fileType === 'video' || fileType === 'camera') {
@@ -6220,8 +6313,8 @@ app.post('/api/upload/media', authenticateToken, mediaUpload.single('file'), asy
       fileSize: req.file.size,
       title: title,
       description: description || '',
-      filePath: req.file.path, // This is now the Cloudinary URL
-      fileUrl: fileUrl,
+      filePath: finalFileUrl, // ✅ ใช้ URL ที่ปรับแต่งแล้ว
+      fileUrl: finalFileUrl,  // ✅ ใช้ URL ที่ปรับแต่งแล้ว
       thumbnailUrl: thumbnailUrl, // ✅ Save thumbnail URL
       status: 'completed',
       
@@ -6268,7 +6361,7 @@ app.post('/api/upload/media', authenticateToken, mediaUpload.single('file'), asy
       success: true,
       message: 'Media uploaded successfully',
       uploadId: uploadId,
-      fileUrl: fileUrl,
+      fileUrl: finalFileUrl, // ✅ ส่งกลับ URL ที่ปรับแต่งแล้ว
       thumbnailUrl: thumbnailUrl,
       fileName: fileName || req.file.originalname,
       fileType: fileType,
