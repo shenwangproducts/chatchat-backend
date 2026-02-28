@@ -3593,6 +3593,14 @@ app.get('/api/users/:userId', authenticateToken, async (req, res) => {
       });
     }
 
+    // ✅ Count friends (mapped to followers/following for now)
+    const friendsCount = await FriendRequest.countDocuments({
+      $or: [
+        { fromUser: user._id, status: 'accepted' },
+        { toUser: user._id, status: 'accepted' }
+      ]
+    });
+
     const userProfile = {
       id: user.userId || user._id.toString(),
       name: user.username,
@@ -3602,7 +3610,9 @@ app.get('/api/users/:userId', authenticateToken, async (req, res) => {
       isOnline: user.lastLogin && (Date.now() - user.lastLogin.getTime() < 5 * 60 * 1000),
       mutualFriends: 0,
       userType: user.userType,
-      joinDate: user.createdAt
+      joinDate: user.createdAt,
+      followersCount: friendsCount,
+      followingCount: friendsCount
     };
 
     console.log('✅ User profile found:', userProfile.name);
@@ -3618,6 +3628,51 @@ app.get('/api/users/:userId', authenticateToken, async (req, res) => {
       success: false,
       error: 'Failed to get user profile'
     });
+  }
+});
+
+// 🎥 Get User Content (Videos/Photos) for Profile
+app.get('/api/users/:userId/content', authenticateToken, async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const { page = 1, limit = 20 } = req.query;
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+
+    console.log('🎥 Fetching content for user profile:', userId);
+
+    // Find user by userId string or ObjectId
+    const user = await User.findOne({
+      $or: [{ userId: userId }, { _id: mongoose.Types.ObjectId.isValid(userId) ? userId : null }]
+    });
+
+    if (!user) {
+      return res.status(404).json({ success: false, error: 'User not found' });
+    }
+
+    const query = {
+      userId: user._id,
+      status: 'completed'
+    };
+
+    const content = await MediaUpload.find(query)
+      .sort({ uploadedAt: -1 })
+      .skip(skip)
+      .limit(parseInt(limit))
+      .lean();
+
+    const formattedContent = content.map(item => ({
+      id: item.uploadId,
+      type: item.fileType === 'photo' ? 'photo' : 'video',
+      image: item.thumbnailUrl || item.fileUrl,
+      videoUrl: item.fileUrl,
+      title: item.title
+    }));
+
+    res.json({ success: true, content: formattedContent });
+
+  } catch (error) {
+    console.error('❌ Get user content error:', error);
+    res.status(500).json({ success: false, error: 'Failed to get user content' });
   }
 });
 
