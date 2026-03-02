@@ -220,6 +220,20 @@ const userSchema = new mongoose.Schema({
   userId: { type: String, unique: true, sparse: true },
   lastUserIdChange: Date,
   profilePicture: String,
+  coverImage: String,
+  bio: String,
+  aboutMe: String,
+  jobTitle: String,
+  hometown: String,
+  currentAddress: String,
+  birthDate: Date,
+  relationshipStatus: String,
+  workplace: String,
+  education: String,
+  interests: [String],
+  socials: {
+    facebook: String, instagram: String, line: String, tiktok: String, twitter: String
+  },
   createdAt: { type: Date, default: Date.now },
   updatedAt: { type: Date, default: Date.now },
   lastLogin: Date,
@@ -2602,7 +2616,13 @@ app.put('/api/profile', authenticateToken, [
       });
     }
 
-    const { username, profilePicture, phone } = req.body;
+    const { 
+      username, profilePicture, phone,
+      coverImage, bio, aboutMe, jobTitle,
+      hometown, currentAddress, birthDate,
+      relationshipStatus, workplace, education,
+      interests, socials
+    } = req.body;
 
     console.log('👤 Updating profile for user:', req.user._id);
 
@@ -2622,6 +2642,20 @@ app.put('/api/profile', authenticateToken, [
         if (phone) {
           req.user.phone = phone.trim();
         }
+
+        // ✅ อัปเดตข้อมูลเพิ่มเติม
+        if (coverImage !== undefined) req.user.coverImage = coverImage;
+        if (bio !== undefined) req.user.bio = bio;
+        if (aboutMe !== undefined) req.user.aboutMe = aboutMe;
+        if (jobTitle !== undefined) req.user.jobTitle = jobTitle;
+        if (hometown !== undefined) req.user.hometown = hometown;
+        if (currentAddress !== undefined) req.user.currentAddress = currentAddress;
+        if (birthDate !== undefined) req.user.birthDate = birthDate ? new Date(birthDate) : null;
+        if (relationshipStatus !== undefined) req.user.relationshipStatus = relationshipStatus;
+        if (workplace !== undefined) req.user.workplace = workplace;
+        if (education !== undefined) req.user.education = education;
+        if (interests !== undefined) req.user.interests = interests;
+        if (socials !== undefined) req.user.socials = socials;
         
         req.user.updatedAt = new Date();
 
@@ -2676,6 +2710,20 @@ app.put('/api/profile', authenticateToken, [
           newValue: phone
         });
       }
+
+      // ✅ อัปเดตข้อมูลเพิ่มเติม (กรณีชื่อไม่เปลี่ยน)
+      if (coverImage !== undefined) req.user.coverImage = coverImage;
+      if (bio !== undefined) req.user.bio = bio;
+      if (aboutMe !== undefined) req.user.aboutMe = aboutMe;
+      if (jobTitle !== undefined) req.user.jobTitle = jobTitle;
+      if (hometown !== undefined) req.user.hometown = hometown;
+      if (currentAddress !== undefined) req.user.currentAddress = currentAddress;
+      if (birthDate !== undefined) req.user.birthDate = birthDate ? new Date(birthDate) : null;
+      if (relationshipStatus !== undefined) req.user.relationshipStatus = relationshipStatus;
+      if (workplace !== undefined) req.user.workplace = workplace;
+      if (education !== undefined) req.user.education = education;
+      if (interests !== undefined) req.user.interests = interests;
+      if (socials !== undefined) req.user.socials = socials;
 
       req.user.updatedAt = new Date();
       await req.user.save();
@@ -3583,11 +3631,6 @@ app.get('/api/users/:userId', authenticateToken, async (req, res) => {
     }
 
     const user = await User.findOne({
-      $or: [
-        { userId: userId },
-        { _id: userId },
-        { _id: mongoose.Types.ObjectId.isValid(userId) ? userId : null }
-      ],
       $or: queryConditions,
       isActive: true
     })
