@@ -3580,7 +3580,8 @@ app.get('/api/users/:userId', authenticateToken, async (req, res) => {
     const user = await User.findOne({
       $or: [
         { userId: userId },
-        { _id: userId }
+        { _id: userId },
+        { _id: mongoose.Types.ObjectId.isValid(userId) ? userId : null }
       ],
       isActive: true
     })
