@@ -3577,12 +3577,18 @@ app.get('/api/users/:userId', authenticateToken, async (req, res) => {
 
     console.log('📋 Get user profile:', userId);
 
+    const queryConditions = [{ userId: userId }];
+    if (mongoose.Types.ObjectId.isValid(userId)) {
+      queryConditions.push({ _id: userId });
+    }
+
     const user = await User.findOne({
       $or: [
         { userId: userId },
         { _id: userId },
         { _id: mongoose.Types.ObjectId.isValid(userId) ? userId : null }
       ],
+      $or: queryConditions,
       isActive: true
     })
     .select('username email userId profilePicture userType lastLogin createdAt phone');
