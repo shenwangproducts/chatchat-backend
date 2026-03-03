@@ -219,6 +219,7 @@ const userSchema = new mongoose.Schema({
   },
   userId: { type: String, unique: true, sparse: true },
   lastUserIdChange: Date,
+  lastUsernameChange: Date,
   profilePicture: String,
   coverImage: String,
   bio: String,
@@ -2595,13 +2596,13 @@ app.get('/api/profile', authenticateToken, async (req, res) => {
 
 // 👤 Update User Profile
 app.put('/api/profile', authenticateToken, [
-  body('username')
+  body('username').optional() // ✅ ทำให้ optional เพราะจะตรวจสอบเอง
     .isLength({ min: 3, max: 30 })
     .withMessage('Username must be between 3-30 characters')
     .trim()
     .escape(),
   body('phone')
-    .optional()
+    .optional({ checkFalsy: true }) // ✅ อนุญาตให้เป็นค่าว่างได้
     .isLength({ min: 10, max: 15 })
     .withMessage('Phone number must be between 10-15 characters')
     .matches(/^[0-9]+$/)
@@ -2617,7 +2618,7 @@ app.put('/api/profile', authenticateToken, [
     }
 
     const { 
-      username, profilePicture, phone,
+      username, password, profilePicture, phone,
       coverImage, bio, aboutMe, jobTitle,
       hometown, currentAddress, birthDate,
       relationshipStatus, workplace, education,
@@ -2625,124 +2626,89 @@ app.put('/api/profile', authenticateToken, [
     } = req.body;
 
     console.log('👤 Updating profile for user:', req.user._id);
+    
+    // --- Username Change Logic ---
+    if (username && username.trim() !== req.user.username) {
+      console.log(`🔄 Username change requested: from '${req.user.username}' to '${username.trim()}'`);
 
-    if (username !== req.user.username) {
-      const existingUser = await User.findOne({ 
+      // 1. Check cooldown period (30 days)
+      const thirtyDays = 30 * 24 * 60 * 60 * 1000;
+      if (req.user.lastUsernameChange && (new Date() - req.user.lastUsernameChange) < thirtyDays) {
+        const daysLeft = Math.ceil((thirtyDays - (new Date() - req.user.lastUsernameChange)) / (1000 * 60 * 60 * 24));
+        return res.status(400).json({
+          success: false,
+          error: `สามารถเปลี่ยนชื่อผู้ใช้ได้อีกครั้งใน ${daysLeft} วัน`
+        });
+      }
+
+      // 2. Check for password
+      if (!password) {
+        return res.status(400).json({
+          success: false,
+          error: 'กรุณากรอกรหัสผ่านเพื่อยืนยันการเปลี่ยนชื่อผู้ใช้'
+        });
+      }
+
+      // 3. Verify password
+      const isPasswordValid = verifyPassword(password, req.user.passwordHash, req.user.passwordSalt);
+      if (!isPasswordValid) {
+        return res.status(401).json({
+          success: false,
+          error: 'รหัสผ่านไม่ถูกต้อง'
+        });
+      }
+
+      // 4. Check if new username is taken
+      const existingUser = await User.findOne({
         _id: { $ne: req.user._id },
         username: username.trim()
       });
-
-      if (!existingUser) {
-        req.user.username = username.trim();
-        
-        if (profilePicture) {
-          req.user.profilePicture = profilePicture;
-        }
-
-        if (phone) {
-          req.user.phone = phone.trim();
-        }
-
-        // ✅ อัปเดตข้อมูลเพิ่มเติม
-        if (coverImage !== undefined) req.user.coverImage = coverImage;
-        if (bio !== undefined) req.user.bio = bio;
-        if (aboutMe !== undefined) req.user.aboutMe = aboutMe;
-        if (jobTitle !== undefined) req.user.jobTitle = jobTitle;
-        if (hometown !== undefined) req.user.hometown = hometown;
-        if (currentAddress !== undefined) req.user.currentAddress = currentAddress;
-        if (birthDate !== undefined) req.user.birthDate = birthDate ? new Date(birthDate) : null;
-        if (relationshipStatus !== undefined) req.user.relationshipStatus = relationshipStatus;
-        if (workplace !== undefined) req.user.workplace = workplace;
-        if (education !== undefined) req.user.education = education;
-        if (interests !== undefined) req.user.interests = interests;
-        if (socials !== undefined) req.user.socials = socials;
-        
-        req.user.updatedAt = new Date();
-
-        await req.user.save();
-
-        // ✅ สร้างการแจ้งเตือนอัปเดตโปรไฟล์
-        await createProfileUpdateNotification(req.user._id, {
-          field: 'username',
-          oldValue: req.user.username,
-          newValue: username
-        });
-
-        console.log('✅ Profile updated successfully');
-
-        res.json({
-          success: true,
-          message: 'Profile updated successfully',
-          user: {
-            id: req.user._id,
-            username: req.user.username,
-            email: req.user.email,
-            phone: req.user.phone,
-            profilePicture: req.user.profilePicture,
-            settings: req.user.settings
-          }
-        });
-      } else {
+      if (existingUser) {
         return res.status(400).json({
           success: false,
           error: 'Username already taken'
         });
       }
-    } else {
-      if (profilePicture) {
-        req.user.profilePicture = profilePicture;
-        
-        // ✅ สร้างการแจ้งเตือนอัปเดตโปรไฟล์
-        await createProfileUpdateNotification(req.user._id, {
-          field: 'profilePicture',
-          oldValue: 'รูปเก่า',
-          newValue: 'รูปใหม่'
-        });
-      }
 
-      if (phone) {
-        req.user.phone = phone.trim();
-        
-        // ✅ สร้างการแจ้งเตือนอัปเดตโปรไฟล์
-        await createProfileUpdateNotification(req.user._id, {
-          field: 'phone',
-          oldValue: req.user.phone || 'ไม่ได้ตั้งค่า',
-          newValue: phone
-        });
-      }
-
-      // ✅ อัปเดตข้อมูลเพิ่มเติม (กรณีชื่อไม่เปลี่ยน)
-      if (coverImage !== undefined) req.user.coverImage = coverImage;
-      if (bio !== undefined) req.user.bio = bio;
-      if (aboutMe !== undefined) req.user.aboutMe = aboutMe;
-      if (jobTitle !== undefined) req.user.jobTitle = jobTitle;
-      if (hometown !== undefined) req.user.hometown = hometown;
-      if (currentAddress !== undefined) req.user.currentAddress = currentAddress;
-      if (birthDate !== undefined) req.user.birthDate = birthDate ? new Date(birthDate) : null;
-      if (relationshipStatus !== undefined) req.user.relationshipStatus = relationshipStatus;
-      if (workplace !== undefined) req.user.workplace = workplace;
-      if (education !== undefined) req.user.education = education;
-      if (interests !== undefined) req.user.interests = interests;
-      if (socials !== undefined) req.user.socials = socials;
-
-      req.user.updatedAt = new Date();
-      await req.user.save();
-
-      console.log('✅ Profile updated successfully');
-
-      res.json({
-        success: true,
-        message: 'Profile updated successfully',
-        user: {
-          id: req.user._id,
-          username: req.user.username,
-          email: req.user.email,
-          phone: req.user.phone,
-          profilePicture: req.user.profilePicture,
-          settings: req.user.settings
-        }
-      });
+      // 5. Update username and timestamp
+      req.user.username = username.trim();
+      req.user.lastUsernameChange = new Date();
+      console.log('✅ Username updated successfully.');
     }
+
+    // --- Other Profile Fields Update ---
+    if (profilePicture !== undefined) req.user.profilePicture = profilePicture;
+    if (phone !== undefined) req.user.phone = phone.trim();
+    if (coverImage !== undefined) req.user.coverImage = coverImage;
+    if (bio !== undefined) req.user.bio = bio;
+    if (aboutMe !== undefined) req.user.aboutMe = aboutMe;
+    if (jobTitle !== undefined) req.user.jobTitle = jobTitle;
+    if (hometown !== undefined) req.user.hometown = hometown;
+    if (currentAddress !== undefined) req.user.currentAddress = currentAddress;
+    if (birthDate !== undefined) req.user.birthDate = birthDate ? new Date(birthDate) : null;
+    if (relationshipStatus !== undefined) req.user.relationshipStatus = relationshipStatus;
+    if (workplace !== undefined) req.user.workplace = workplace;
+    if (education !== undefined) req.user.education = education;
+    if (interests !== undefined) req.user.interests = interests;
+    if (socials !== undefined) req.user.socials = socials;
+
+    req.user.updatedAt = new Date();
+    await req.user.save();
+
+    console.log('✅ Profile updated successfully');
+
+    res.json({
+      success: true,
+      message: 'Profile updated successfully',
+      user: {
+        id: req.user._id,
+        username: req.user.username,
+        email: req.user.email,
+        phone: req.user.phone,
+        profilePicture: req.user.profilePicture,
+        settings: req.user.settings
+      }
+    });
 
   } catch (error) {
     console.error('❌ Update profile error:', error);
