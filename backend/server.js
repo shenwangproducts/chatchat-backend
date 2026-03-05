@@ -230,7 +230,9 @@ const userSchema = new mongoose.Schema({
   birthDate: Date,
   relationshipStatus: String,
   workplace: String,
-  education: String,
+  workStartDate: Date,
+  workCountry: String,
+  education: mongoose.Schema.Types.Mixed,
   interests: [String],
   socials: {
     facebook: String, instagram: String, line: String, tiktok: String, twitter: String
@@ -2621,7 +2623,7 @@ app.put('/api/profile', authenticateToken, [
       username, password, profilePicture, phone,
       coverImage, bio, aboutMe, jobTitle,
       hometown, currentAddress, birthDate,
-      relationshipStatus, workplace, education,
+      relationshipStatus, workplace, workStartDate, workCountry, education,
       interests, socials
     } = req.body;
 
@@ -2688,6 +2690,8 @@ app.put('/api/profile', authenticateToken, [
     if (birthDate !== undefined) req.user.birthDate = birthDate ? new Date(birthDate) : null;
     if (relationshipStatus !== undefined) req.user.relationshipStatus = relationshipStatus;
     if (workplace !== undefined) req.user.workplace = workplace;
+    if (workStartDate !== undefined) req.user.workStartDate = workStartDate ? new Date(workStartDate) : null;
+    if (workCountry !== undefined) req.user.workCountry = workCountry;
     if (education !== undefined) req.user.education = education;
     if (interests !== undefined) req.user.interests = interests;
     if (socials !== undefined) req.user.socials = socials;
