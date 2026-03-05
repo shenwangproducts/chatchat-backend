@@ -2574,7 +2574,21 @@ app.get('/api/profile', authenticateToken, async (req, res) => {
         userId: req.user.userId,
         lastLogin: req.user.lastLogin,
         pdpaConsent: req.user.pdpaConsent,
-        consentTimestamp: req.user.consentTimestamp
+        consentTimestamp: req.user.consentTimestamp,
+        coverImage: req.user.coverImage,
+        bio: req.user.bio,
+        aboutMe: req.user.aboutMe,
+        jobTitle: req.user.jobTitle,
+        hometown: req.user.hometown,
+        currentAddress: req.user.currentAddress,
+        birthDate: req.user.birthDate,
+        relationshipStatus: req.user.relationshipStatus,
+        workplace: req.user.workplace,
+        workStartDate: req.user.workStartDate,
+        workCountry: req.user.workCountry,
+        education: req.user.education,
+        interests: req.user.interests,
+        socials: req.user.socials
       },
       wallet: wallet ? {
         balance: wallet.balance,
@@ -3604,7 +3618,7 @@ app.get('/api/users/:userId', authenticateToken, async (req, res) => {
       $or: queryConditions,
       isActive: true
     })
-    .select('username email userId profilePicture userType lastLogin createdAt phone');
+    .select('username email userId profilePicture coverImage userType lastLogin createdAt phone bio aboutMe jobTitle hometown currentAddress birthDate relationshipStatus workplace workStartDate workCountry education interests socials');
 
     if (!user) {
       return res.status(404).json({
@@ -3632,7 +3646,22 @@ app.get('/api/users/:userId', authenticateToken, async (req, res) => {
       userType: user.userType,
       joinDate: user.createdAt,
       followersCount: friendsCount,
-      followingCount: friendsCount
+      followingCount: friendsCount,
+      // Extended Profile Data
+      coverImage: user.coverImage,
+      bio: user.bio,
+      aboutMe: user.aboutMe,
+      jobTitle: user.jobTitle,
+      hometown: user.hometown,
+      currentAddress: user.currentAddress,
+      birthDate: user.birthDate,
+      relationshipStatus: user.relationshipStatus,
+      workplace: user.workplace,
+      workStartDate: user.workStartDate,
+      workCountry: user.workCountry,
+      education: user.education,
+      interests: user.interests,
+      socials: user.socials
     };
 
     console.log('✅ User profile found:', userProfile.name);
