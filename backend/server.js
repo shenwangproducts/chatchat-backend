@@ -2955,8 +2955,7 @@ app.post('/api/user/send-verification-email', authenticateToken, async (req, res
       success: true,
       message: 'Verification email sent successfully',
       email: user.email,
-      // ⚠️ ลบออกในโปรดักชั่น - เฉพาะ development เท่านั้น
-      verificationToken: process.env.NODE_ENV === 'development' ? verificationToken : undefined
+      
     });
 
   } catch (error) {
