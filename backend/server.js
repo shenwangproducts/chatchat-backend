@@ -15,6 +15,7 @@ const cloudinaryStorage = require('multer-storage-cloudinary');
 const crypto = require('crypto');
 
 const admin = require('firebase-admin');
+const sgMail = require('@sendgrid/mail');
 
 const app = express();
 const PORT = process.env.PORT || 30001;
@@ -44,6 +45,14 @@ if (process.env.FIREBASE_SERVICE_ACCOUNT_KEY) {
   }
 } else {
   console.warn('⚠️ FIREBASE_SERVICE_ACCOUNT_KEY not set, push notifications disabled');
+}
+
+// SendGrid initialization
+if (process.env.SENDGRID_API_KEY) {
+  sgMail.setApiKey(process.env.SENDGRID_API_KEY);
+  console.log('✅ SendGrid initialized successfully');
+} else {
+  console.warn('⚠️ SENDGRID_API_KEY not set, email service disabled');
 }
 
 // ✅ Security Middleware
@@ -213,6 +222,9 @@ const userSchema = new mongoose.Schema({
     lowercase: true,
     index: true 
   },
+  emailVerified: { type: Boolean, default: false },
+  emailVerificationToken: { type: String, sparse: true },
+  emailVerificationTokenExpiry: { type: Date, sparse: true },
   phone: {
     type: String,
     trim: true,
@@ -1632,12 +1644,57 @@ const initializeMourningSettings = async () => {
 };
 
 const sendRecoveryEmail = async (email, recoveryId, securityQuestion) => {
-  console.log('📧 Recovery ID Created:', {
-    email: email,
-    recoveryId: recoveryId,
-    securityQuestion: securityQuestion
-  });
-  return true;
+  try {
+    if (!process.env.SENDGRID_API_KEY) {
+      console.warn('⚠️ SendGrid API key not configured, skipping email');
+      return false;
+    }
+
+    const msg = {
+      to: email,
+      from: process.env.SENDGRID_FROM_EMAIL || 'noreply@chatchat.app',
+      subject: '🔐 Your Chat Chat Recovery ID',
+      html: `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+          <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 30px; text-align: center; border-radius: 10px 10px 0 0;">
+            <h1 style="color: white; margin: 0;">🔐 Chat Chat Recovery ID</h1>
+          </div>
+          <div style="background: #f8f9fa; padding: 30px; border-radius: 0 0 10px 10px;">
+            <p style="color: #333; font-size: 16px; margin-bottom: 20px;">Hello,</p>
+            <p style="color: #555; font-size: 14px; margin-bottom: 20px;">Your recovery ID has been created. Keep this ID safe to recover your account in the future.</p>
+            
+            <div style="background: white; border-left: 4px solid #667eea; padding: 15px; margin: 20px 0;">
+              <p style="color: #999; font-size: 12px; margin: 5px 0;">RECOVERY ID:</p>
+              <p style="color: #333; font-size: 18px; font-weight: bold; margin: 5px 0; font-family: monospace;">${recoveryId}</p>
+            </div>
+            
+            <div style="background: #f0f4f8; border-left: 4px solid #667eea; padding: 15px; margin: 20px 0;">
+              <p style="color: #999; font-size: 12px; margin: 5px 0;">SECURITY QUESTION:</p>
+              <p style="color: #333; font-size: 14px; margin: 5px 0;">${securityQuestion}</p>
+            </div>
+            
+            <p style="color: #777; font-size: 12px; margin-top: 30px; border-top: 1px solid #ddd; padding-top: 20px;">
+              ⏰ This recovery ID is valid indefinitely. Keep it secure and never share it with anyone.
+            </p>
+            <p style="color: #999; font-size: 12px; margin-top: 15px;">
+              If you didn't request this recovery ID, please ignore this email.
+            </p>
+          </div>
+          <div style="background: #f8f9fa; padding: 15px; text-align: center; color: #999; font-size: 11px;">
+            <p>© 2026 Chat Chat. All rights reserved.</p>
+          </div>
+        </div>
+      `,
+      text: `Your Chat Chat Recovery ID: ${recoveryId}\n\nSecurity Question: ${securityQuestion}\n\nKeep this ID safe to recover your account in the future.`
+    };
+
+    await sgMail.send(msg);
+    console.log('✅ Recovery email sent successfully to:', email);
+    return true;
+  } catch (error) {
+    console.error('❌ Failed to send recovery email:', error.message);
+    return false;
+  }
 };
 
 // =============================================
@@ -2811,7 +2868,161 @@ app.put('/api/profile', authenticateToken, [
 });
 
 // =============================================
-// 🔐 RECOVERY ID API ROUTES
+// � EMAIL VERIFICATION API ROUTES
+// =============================================
+
+// 📧 Send Email Verification
+app.post('/api/user/send-verification-email', authenticateToken, async (req, res) => {
+  try {
+    console.log('📧 Sending verification email for user:', req.user._id);
+
+    if (!process.env.SENDGRID_API_KEY) {
+      return res.status(503).json({
+        success: false,
+        error: 'Email service is not configured'
+      });
+    }
+
+    const user = await User.findById(req.user._id);
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        error: 'User not found'
+      });
+    }
+
+    // ✅ สร้าง verification token (หากยังไม่มี)
+    const verificationToken = crypto.randomBytes(32).toString('hex');
+    const verificationTokenExpiry = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
+
+    // ✅ บันทึก token ไว้ (สำหรับ confirm verification ในอนาคต)
+    user.emailVerificationToken = verificationToken;
+    user.emailVerificationTokenExpiry = verificationTokenExpiry;
+    await user.save();
+
+    // ✅ URL สำหรับ confirm email (ที่ใช้งานได้จริง ต้องอัปเดตตามหน้าแอพ)
+    const verificationUrl = `https://chatchat-backend.onrender.com/api/user/verify-email?token=${verificationToken}`;
+
+    console.log('📤 Verification email details:', {
+      email: user.email,
+      username: user.username,
+      verificationUrl: verificationUrl,
+      expiresAt: verificationTokenExpiry
+    });
+
+    // ✅ Send verification email via SendGrid
+    const msg = {
+      to: user.email,
+      from: process.env.SENDGRID_FROM_EMAIL || 'noreply@chatchat.app',
+      subject: '📧 Verify Your Email Address - Chat Chat',
+      html: `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+          <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 30px; text-align: center; border-radius: 10px 10px 0 0;">
+            <h1 style="color: white; margin: 0;">📧 Verify Your Email</h1>
+          </div>
+          <div style="background: #f8f9fa; padding: 30px; border-radius: 0 0 10px 10px;">
+            <p style="color: #333; font-size: 16px; margin-bottom: 10px;">Hi ${user.username},</p>
+            <p style="color: #555; font-size: 14px; margin-bottom: 20px;">Welcome to Chat Chat! Please verify your email address to complete your registration and unlock all features.</p>
+            
+            <div style="text-align: center; margin: 30px 0;">
+              <a href="${verificationUrl}" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 12px 40px; text-decoration: none; border-radius: 5px; font-weight: bold; display: inline-block;">✅ Verify Email</a>
+            </div>
+            
+            <p style="color: #777; font-size: 12px; text-align: center; margin: 20px 0;">Or copy this link:</p>
+            <div style="background: white; border: 1px solid #ddd; padding: 15px; border-radius: 5px; word-break: break-all; color: #666; font-size: 12px;">
+              ${verificationUrl}
+            </div>
+            
+            <p style="color: #777; font-size: 12px; margin-top: 20px; border-top: 1px solid #ddd; padding-top: 20px;">
+              ⏰ This verification link will expire in <strong>24 hours</strong>.
+            </p>
+            <p style="color: #999; font-size: 12px; margin-top: 15px;">
+              If you didn't create a Chat Chat account, please ignore this email.
+            </p>
+          </div>
+          <div style="background: #f8f9fa; padding: 15px; text-align: center; color: #999; font-size: 11px;">
+            <p>© 2026 Chat Chat. All rights reserved.</p>
+          </div>
+        </div>
+      `,
+      text: `Hi ${user.username},\n\nPlease verify your email by clicking the link below:\n\n${verificationUrl}\n\nThis link will expire in 24 hours.\n\nIf you didn't create this account, please ignore this email.`
+    };
+
+    await sgMail.send(msg);
+    console.log('✅ Verification email sent successfully to:', user.email);
+
+    res.json({
+      success: true,
+      message: 'Verification email sent successfully',
+      email: user.email,
+      // ⚠️ ลบออกในโปรดักชั่น - เฉพาะ development เท่านั้น
+      verificationToken: process.env.NODE_ENV === 'development' ? verificationToken : undefined
+    });
+
+  } catch (error) {
+    console.error('❌ Send verification email error:', error.message);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to send verification email: ' + error.message
+    });
+  }
+});
+
+// 📧 Verify Email (GET endpoint)
+app.get('/api/user/verify-email', async (req, res) => {
+  try {
+    const { token } = req.query;
+
+    if (!token) {
+      return res.status(400).json({
+        success: false,
+        error: 'Verification token is required'
+      });
+    }
+
+    console.log('🔍 Verifying email with token:', token.substring(0, 10) + '...');
+
+    const user = await User.findOne({
+      emailVerificationToken: token,
+      emailVerificationTokenExpiry: { $gt: new Date() }
+    });
+
+    if (!user) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid or expired verification token'
+      });
+    }
+
+    // ✅ Mark email as verified
+    user.emailVerified = true;
+    user.emailVerificationToken = undefined;
+    user.emailVerificationTokenExpiry = undefined;
+    await user.save();
+
+    console.log('✅ Email verified successfully for user:', user._id);
+
+    res.json({
+      success: true,
+      message: 'Email verified successfully',
+      user: {
+        id: user._id,
+        email: user.email,
+        emailVerified: user.emailVerified
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Verify email error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to verify email'
+    });
+  }
+});
+
+// =============================================
+// �🔐 RECOVERY ID API ROUTES
 // =============================================
 
 // 🔑 Create Recovery ID

@@ -17,6 +17,7 @@
   "author": "Your Name",
   "license": "MIT",
   "dependencies": {
+    "@sendgrid/mail": "^8.1.6",
     "agora-token": "^2.0.5",
     "bcryptjs": "^2.4.3",
     "cloudinary": "^2.9.0",
