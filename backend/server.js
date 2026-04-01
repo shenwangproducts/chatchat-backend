@@ -107,7 +107,17 @@ const upload = multer({
 const mediaStorage = cloudinaryStorage({
   cloudinary: cloudinary,
   params: {
-    folder: 'chatchat_media', // Folder name on Cloudinary
+    folder: (req, file) => {
+      // ถ้าเป็น story ให้เก็บในโฟลเดอร์แยก
+      if (req.body.shareToStory === true || req.body.shareToStory === 'true') {
+        return 'chatchat_stories';
+      }
+      // ถ้ามีการส่ง folder มา ให้ใช้ folder นั้น (fallback)
+      if (req.body.folder && typeof req.body.folder === 'string') {
+        return req.body.folder;
+      }
+      return 'chatchat_media';
+    },
     resource_type: 'auto', // Automatically detect if it's an image or video
     public_id: (req, file) => {
       // Create a unique public_id from the original file name
@@ -6142,19 +6152,23 @@ app.post('/api/cloudinary/signature', authenticateToken, (req, res) => {
       return res.status(500).json({ success: false, error: 'Cloudinary not configured' });
     }
 
+    // เลือก folder จาก request ถ้ามี (default = chatchat_media)
+    const folder = req.body.folder || (req.body.shareToStory === true || req.body.shareToStory === 'true' ? 'chatchat_stories' : 'chatchat_media');
+
     // ✅ สร้าง string ที่จะใช้ในการ sign
     // ต้องเรียงตามตัวอักษร: folder มาก่อน timestamp
-    const stringToSign = `folder=chatchat_media&timestamp=${timestamp}${apiSecret}`;
+    const stringToSign = `folder=${folder}&timestamp=${timestamp}${apiSecret}`;
 
     // ✅ สร้าง signature ด้วย SHA-1
     const signature = crypto.createHash('sha1').update(stringToSign).digest('hex');
 
-    console.log('✍️ Generated Cloudinary signature for user:', req.user._id);
+    console.log('✍️ Generated Cloudinary signature for user:', req.user._id, 'folder:', folder);
 
     res.json({
       success: true,
       signature: signature,
-      timestamp: timestamp
+      timestamp: timestamp,
+      folder: folder
     });
 
   } catch (error) {
