@@ -1462,17 +1462,24 @@ const initializeBankServices = async () => {
 
 const createSystemAccount = async () => {
   try {
-    const existingSystem = await User.findOne({ userType: 'system', email: 'system@connect.app' });
+    const defaultEmail = process.env.SUPPORT_EMAIL || 'system@connect.app';
+    const defaultPassword = process.env.SUPPORT_PASSWORD || 'support123';
+    const defaultUserId = process.env.SUPPORT_USER_ID || 'support';
+    const defaultUsername = process.env.SUPPORT_USERNAME || 'Connect Support';
+
+    const existingSystem = await User.findOne({ userType: 'system' });
+
+    const salt = generateSalt();
+    const passwordHash = hashPassword(defaultPassword, salt);
 
     if (!existingSystem) {
-      const salt = generateSalt();
       const systemUser = new User({
-        username: 'Connect Support',
-        email: 'system@connect.app',
-        passwordHash: hashPassword('support123', salt),
+        username: defaultUsername,
+        email: defaultEmail,
+        passwordHash,
         passwordSalt: salt,
         userType: 'system',
-        userId: 'support',
+        userId: defaultUserId,
         settings: {
           language: 'en',
           theme: 'white'
@@ -1483,10 +1490,17 @@ const createSystemAccount = async () => {
       await createUserWallet(systemUser._id);
       console.log('✅ System account created successfully');
     } else {
-      console.log('✅ System account already exists');
+      existingSystem.username = defaultUsername;
+      existingSystem.email = defaultEmail;
+      existingSystem.passwordHash = passwordHash;
+      existingSystem.passwordSalt = salt;
+      existingSystem.userId = defaultUserId;
+      await existingSystem.save();
+      await createUserWallet(existingSystem._id);
+      console.log('✅ System account already exists and was updated');
     }
   } catch (error) {
-    console.error('❌ Error creating system account:', error);
+    console.error('❌ Error creating/updating system account:', error);
   }
 };
 
@@ -2555,6 +2569,55 @@ app.post('/api/login', validateLogin, async (req, res) => {
 });
 
 // 👤 Get User Profile
+app.post('/api/system/support-account', async (req, res) => {
+  const adminKey = req.headers['x-admin-key'];
+  const ADMIN_API_KEY = process.env.ADMIN_API_KEY || 'changeme';
+
+  if (adminKey !== ADMIN_API_KEY) {
+    return res.status(403).json({ success: false, error: 'Forbidden: invalid admin key' });
+  }
+
+  const { username, email, password, userId } = req.body;
+  if (!username || !email || !password || !userId) {
+    return res.status(400).json({ success: false, error: 'Missing required fields: username,email,password,userId' });
+  }
+
+  try {
+    let systemUser = await User.findOne({ userType: 'system' });
+
+    const salt = generateSalt();
+    const passwordHash = hashPassword(password, salt);
+
+    if (systemUser) {
+      systemUser.username = username;
+      systemUser.email = email.toLowerCase();
+      systemUser.passwordHash = passwordHash;
+      systemUser.passwordSalt = salt;
+      systemUser.userId = userId;
+      await systemUser.save();
+      await createUserWallet(systemUser._id);
+      return res.json({ success: true, message: 'Support user updated', user: { id: systemUser._id, userId: systemUser.userId, email: systemUser.email } });
+    }
+
+    systemUser = new User({
+      username,
+      email: email.toLowerCase(),
+      passwordHash,
+      passwordSalt: salt,
+      userType: 'system',
+      userId,
+      settings: { language: 'en', theme: 'white' }
+    });
+
+    await systemUser.save();
+    await createUserWallet(systemUser._id);
+    return res.status(201).json({ success: true, message: 'Support user created', user: { id: systemUser._id, userId: systemUser.userId, email: systemUser.email } });
+  } catch (error) {
+    console.error('❌ Support user endpoint error:', error);
+    return res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 app.get('/api/profile', authenticateToken, async (req, res) => {
   try {
     console.log('📋 Profile request for user:', req.user._id);
