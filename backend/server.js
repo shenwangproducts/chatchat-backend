@@ -158,7 +158,7 @@ const mediaFilter = (req, file, cb) => {
   cb(new Error(error));
 };
 
-const mediaUpload = multer({ 
+const mediaUpload = multer({
   storage: mediaStorage,
   limits: { fileSize: 500 * 1024 * 1024 }, // 500MB limit for media
   fileFilter: mediaFilter
@@ -189,13 +189,13 @@ db.once('open', () => {
 // =============================================
 // User Schema
 const userSchema = new mongoose.Schema({
-  username: { 
-    type: String, 
-    required: true, 
+  username: {
+    type: String,
+    required: true,
     trim: true,
-    index: true 
+    index: true
   },
-  email: { 
+  email: {
     type: String, 
     required: true, 
     unique: true, 
@@ -203,8 +203,8 @@ const userSchema = new mongoose.Schema({
     lowercase: true,
     index: true 
   },
-  phone: { 
-    type: String, 
+  phone: {
+    type: String,
     trim: true,
     sparse: true
   },
@@ -264,9 +264,9 @@ const User = mongoose.model('User', userSchema);
 
 // Wallet Schema
 const walletSchema = new mongoose.Schema({
-  userId: { 
-    type: mongoose.Schema.Types.ObjectId, 
-    ref: 'User', 
+  userId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
     required: true,
     unique: true
   },
@@ -283,25 +283,25 @@ const Wallet = mongoose.model('Wallet', walletSchema);
 
 // Transaction Schema
 const transactionSchema = new mongoose.Schema({
-  userId: { 
-    type: mongoose.Schema.Types.ObjectId, 
-    ref: 'User', 
-    required: true 
+  userId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    required: true
   },
   walletId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Wallet',
     required: true
   },
-  type: { 
-    type: String, 
+  type: {
+    type: String,
     enum: ['topup', 'transfer', 'payment', 'withdraw', 'reward', 'exchange'],
-    required: true 
+    required: true
   },
   amount: { type: Number, required: true },
   currency: { type: String, default: 'THB' },
   description: { type: String, required: true },
-  status: { 
+  status: {
     type: String, 
     enum: ['pending', 'completed', 'failed', 'cancelled'],
     default: 'pending'
@@ -319,42 +319,42 @@ const Transaction = mongoose.model('Transaction', transactionSchema);
 
 // Identity Verification Schema - IMPROVED VERSION
 const identityVerificationSchema = new mongoose.Schema({
-  userId: { 
-    type: mongoose.Schema.Types.ObjectId, 
-    ref: 'User', 
+  userId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
     required: true,
     index: true
   },
-  verificationMethod: { 
-    type: String, 
+  verificationMethod: {
+    type: String,
     enum: ['id_card', 'passport'],
-    required: true 
+    required: true
   },
-  status: { 
-    type: String, 
+  status: {
+    type: String,
     enum: ['pending', 'verified', 'rejected', 'expired'],
     default: 'pending',
     index: true
   },
-  documentNumber: { 
-    type: String, 
+  documentNumber: {
+    type: String,
     required: true,
     trim: true
   },
-  fullName: { 
-    type: String, 
+  fullName: {
+    type: String,
     required: true,
     trim: true
   },
-  birthDate: { 
-    type: Date 
+  birthDate: {
+    type: Date
   },
-  nationality: { 
+  nationality: {
     type: String,
     trim: true
   },
-  expiryDate: { 
-    type: Date 
+  expiryDate: {
+    type: Date
   },
   faceScanData: {
     stepsCompleted: { type: Number, default: 0 },
@@ -362,7 +362,7 @@ const identityVerificationSchema = new mongoose.Schema({
     scanResults: [{
       step: { type: Number, required: true },
       title: { type: String, required: true },
-      status: { 
+      status: {
         type: String, 
         enum: ['pending', 'completed', 'failed'],
         default: 'pending'
@@ -385,15 +385,15 @@ const IdentityVerification = mongoose.model('IdentityVerification', identityVeri
 
 // Reward Points Schema
 const rewardSchema = new mongoose.Schema({
-  userId: { 
-    type: mongoose.Schema.Types.ObjectId, 
-    ref: 'User', 
-    required: true 
+  userId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    required: true
   },
-  type: { 
-    type: String, 
+  type: {
+    type: String,
     enum: ['earn', 'redeem', 'expire'],
-    required: true 
+    required: true
   },
   points: { type: Number, required: true },
   description: { type: String, required: true },
@@ -434,15 +434,15 @@ const BankService = mongoose.model('BankService', bankServiceSchema);
 
 // Chat Schema
 const chatSchema = new mongoose.Schema({
-  participants: [{ 
-    type: mongoose.Schema.Types.ObjectId, 
+  participants: [{
+    type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
-    required: true 
+    required: true
   }],
-  chatType: { 
-    type: String, 
-    enum: ['direct', 'group', 'official'], 
-    default: 'direct' 
+  chatType: {
+    type: String,
+    enum: ['direct', 'group', 'official'],
+    default: 'direct'
   },
   title: { type: String, required: true },
   description: { type: String },
@@ -465,20 +465,20 @@ const Chat = mongoose.model('Chat', chatSchema);
 
 // Message Schema
 const messageSchema = new mongoose.Schema({
-  chatId: { 
-    type: mongoose.Schema.Types.ObjectId, 
-    ref: 'Chat', 
-    required: true 
+  chatId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Chat',
+    required: true
   },
-  senderId: { 
-    type: mongoose.Schema.Types.ObjectId, 
-    ref: 'User', 
-    required: true 
+  senderId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    required: true
   },
-  messageType: { 
-    type: String, 
+  messageType: {
+    type: String,
     enum: ['text', 'image', 'file', 'system', 'deleted'],
-    default: 'text' 
+    default: 'text'
   },
   content: { type: String, required: true },
   timestamp: { type: Date, default: Date.now },
@@ -498,20 +498,20 @@ const Message = mongoose.model('Message', messageSchema);
 
 // Friend Request Schema
 const friendRequestSchema = new mongoose.Schema({
-  fromUser: { 
-    type: mongoose.Schema.Types.ObjectId, 
-    ref: 'User', 
-    required: true 
+  fromUser: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    required: true
   },
-  toUser: { 
-    type: mongoose.Schema.Types.ObjectId, 
-    ref: 'User', 
-    required: true 
+  toUser: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    required: true
   },
-  status: { 
-    type: String, 
-    enum: ['pending', 'accepted', 'rejected'], 
-    default: 'pending' 
+  status: {
+    type: String,
+    enum: ['pending', 'accepted', 'rejected'],
+    default: 'pending'
   },
   createdAt: { type: Date, default: Date.now },
   updatedAt: { type: Date, default: Date.now }
@@ -549,15 +549,15 @@ const MourningSettings = mongoose.model('MourningSettings', mourningSettingsSche
 
 // Recovery ID Schema
 const recoveryIdSchema = new mongoose.Schema({
-  userId: { 
-    type: mongoose.Schema.Types.ObjectId, 
-    ref: 'User', 
-    required: true 
+  userId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    required: true
   },
-  recoveryId: { 
-    type: String, 
-    required: true, 
-    unique: true 
+  recoveryId: {
+    type: String,
+    required: true,
+    unique: true
   },
   securityQuestion: { type: String, required: true },
   securityAnswer: { type: String, required: true },
@@ -594,11 +594,11 @@ const File = mongoose.model('File', fileSchema);
 // MediaUpload Schema - สำหรับติดตามการอัพโหลด media content (วิดีโอ, รูปภาพ, ฯลฯ)
 const mediaUploadSchema = new mongoose.Schema({
   uploadId: { type: String, unique: true, required: true, index: true }, // Unique identifier for tracking
-  userId: { 
-    type: mongoose.Schema.Types.ObjectId, 
-    ref: 'User', 
+  userId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
     required: true,
-    index: true 
+    index: true
   },
   publicId: { type: String }, // ✅ Cloudinary public_id
   fileName: { type: String, required: true },
@@ -634,7 +634,7 @@ const mediaUploadSchema = new mongoose.Schema({
   scheduledTime: { type: Date, sparse: true },
   collaborators: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
   // ------------------------------------
-  
+
   uploadedAt: { type: Date, default: Date.now },
   completedAt: { type: Date, sparse: true },
   cancelledAt: { type: Date, sparse: true },
@@ -654,11 +654,11 @@ const MediaUpload = mongoose.model('MediaUpload', mediaUploadSchema);
 // UploadProgress Schema - สำหรับให้ไคลเอนต์ติดตามความคืบหน้า
 const uploadProgressSchema = new mongoose.Schema({
   uploadId: { type: String, unique: true, required: true, index: true },
-  userId: { 
-    type: mongoose.Schema.Types.ObjectId, 
-    ref: 'User', 
+  userId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
     required: true,
-    index: true 
+    index: true
   },
   bytesUploaded: { type: Number, default: 0 },
   totalBytes: { type: Number, required: true },
@@ -677,8 +677,8 @@ const uploadProgressSchema = new mongoose.Schema({
   chunks: [{
     chunkIndex: { type: Number, required: true },
     size: { type: Number, required: true },
-    status: { 
-      type: String, 
+    status: {
+      type: String,
       enum: ['pending', 'uploading', 'completed', 'failed'],
       default: 'pending'
     },
@@ -693,16 +693,16 @@ const UploadProgress = mongoose.model('UploadProgress', uploadProgressSchema);
 
 // Story Schema
 const storySchema = new mongoose.Schema({
-  userId: { 
-    type: mongoose.Schema.Types.ObjectId, 
-    ref: 'User', 
+  userId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
     required: true,
-    index: true 
+    index: true
   },
-  type: { 
-    type: String, 
-    enum: ['text', 'image', 'video'], 
-    default: 'text' 
+  type: {
+    type: String,
+    enum: ['text', 'image', 'video'],
+    default: 'text'
   },
   mediaUrl: String,
   thumbnailUrl: String,
@@ -736,14 +736,14 @@ const Story = mongoose.model('Story', storySchema);
 
 // Notification Schema
 const notificationSchema = new mongoose.Schema({
-  userId: { 
-    type: mongoose.Schema.Types.ObjectId, 
-    ref: 'User', 
+  userId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
     required: true,
-    index: true 
+    index: true
   },
-  type: { 
-    type: String, 
+  type: {
+    type: String,
     enum: [
       'wallet_transaction',    // ธุรกรรมกระเป๋าเงิน
       'wallet_points',         // คะแนนคอยน์
@@ -761,52 +761,52 @@ const notificationSchema = new mongoose.Schema({
     required: true,
     index: true
   },
-  title: { 
-    type: String, 
-    required: true 
+  title: {
+    type: String,
+    required: true
   },
-  message: { 
-    type: String, 
-    required: true 
+  message: {
+    type: String,
+    required: true
   },
-  icon: { 
-    type: String, 
+  icon: {
+    type: String,
     default: '🔔'
   },
-  color: { 
-    type: String, 
+  color: {
+    type: String,
     default: '#1FAE4B'
   },
-  data: { 
-    type: Map, 
+  data: {
+    type: Map,
     of: mongoose.Schema.Types.Mixed,
     default: {}
   },
-  isRead: { 
-    type: Boolean, 
+  isRead: {
+    type: Boolean,
     default: false,
-    index: true 
+    index: true
   },
-  isArchived: { 
-    type: Boolean, 
-    default: false 
+  isArchived: {
+    type: Boolean,
+    default: false
   },
-  priority: { 
-    type: String, 
+  priority: {
+    type: String,
     enum: ['low', 'medium', 'high', 'urgent'],
     default: 'medium'
   },
-  expiresAt: { 
+  expiresAt: {
     type: Date,
     index: true,
     expires: 30 * 24 * 60 * 60 // 30 วัน
   },
-  createdAt: { 
-    type: Date, 
+  createdAt: {
+    type: Date,
     default: Date.now,
-    index: true 
+    index: true
   },
-  readAt: { 
+  readAt: {
     type: Date 
   },
   sourceId: { 
@@ -851,7 +851,7 @@ const createNotification = async ({
     });
 
     await notification.save();
-    
+
     // ✅ ส่ง Push Notification (ถ้ามี Firebase setup)
     await sendPushNotification(userId, {
       title,
@@ -904,9 +904,9 @@ const sendPushNotification = async (userId, payload) => {
 // 💰 สร้างการแจ้งเตือนธุรกรรมกระเป๋าเงิน
 const createWalletTransactionNotification = async (userId, transactionData) => {
   const { bankName, serviceType, amount, time, referenceId } = transactionData;
-  
+
   let title, message, icon, color;
-  
+
   switch (serviceType) {
     case 'scan_pay':
       title = 'แสกนจ่าย';
@@ -962,9 +962,9 @@ const createWalletTransactionNotification = async (userId, transactionData) => {
 // 🎯 สร้างการแจ้งเตือนคะแนนคอยน์
 const createCoinPointsNotification = async (userId, pointsData) => {
   const { points, description, balanceAfter, type } = pointsData;
-  
+
   let title, message, icon;
-  
+
   if (type === 'earn') {
     title = 'ได้รับคะแนนคอยน์';
     message = `+${points} คะแนน (${description})`;
@@ -1005,10 +1005,10 @@ const createCoinPointsNotification = async (userId, pointsData) => {
 // 💬 สร้างการแจ้งเตือนข้อความใหม่
 const createChatMessageNotification = async (userId, chatData) => {
   const { senderName, message, chatId, messageType } = chatData;
-  
+
   let icon = '💬';
   let title = 'ข้อความใหม่';
-  
+
   if (messageType === 'image') {
     icon = '🖼️';
     title = 'รูปภาพใหม่';
@@ -1042,7 +1042,7 @@ const createChatMessageNotification = async (userId, chatData) => {
 // 📞 สร้างการแจ้งเตือนการโทรเข้า
 const createCallNotification = async (userId, callData) => {
   const { callerName, callType, callId } = callData;
-  
+
   const title = callType === 'video' ? 'วิดีโอคอลล์เข้า' : 'โทรศัพท์เข้า';
   const icon = callType === 'video' ? '🎥' : '📞';
 
@@ -1293,7 +1293,7 @@ const _getTimeAgo = (date) => {
   const diffMin = Math.floor(diffSec / 60);
   const diffHour = Math.floor(diffMin / 60);
   const diffDay = Math.floor(diffHour / 24);
-  
+
   if (diffSec < 60) return 'เมื่อสักครู่';
   if (diffMin < 60) return `${diffMin} นาทีที่แล้ว`;
   if (diffHour < 24) return `${diffHour} ชั่วโมงที่แล้ว`;
@@ -1329,7 +1329,7 @@ const generateAuthToken = (userId) => jwt.sign({ userId }, JWT_SECRET, { expires
 const createUserWallet = async (userId) => {
   try {
     const existingWallet = await Wallet.findOne({ userId });
-    
+
     if (!existingWallet) {
       const newWallet = new Wallet({
         userId: userId,
@@ -1337,12 +1337,12 @@ const createUserWallet = async (userId) => {
         coinPoints: 0,
         currency: 'THB'
       });
-      
+
       await newWallet.save();
       console.log('✅ Wallet created for user:', userId);
       return newWallet;
     }
-    
+
     return existingWallet;
   } catch (error) {
     console.error('❌ Error creating wallet:', error);
@@ -1447,13 +1447,13 @@ const initializeBankServices = async () => {
 
     for (const bankData of bankServices) {
       const existingBank = await BankService.findOne({ code: bankData.code });
-      
+
       if (!existingBank) {
         await BankService.create(bankData);
         console.log('✅ Bank service created:', bankData.code);
       }
     }
-    
+
     console.log('✅ Bank services initialized successfully');
   } catch (error) {
     console.error('❌ Error initializing bank services:', error);
@@ -1463,7 +1463,7 @@ const initializeBankServices = async () => {
 const createSystemAccount = async () => {
   try {
     const existingSystem = await User.findOne({ userType: 'system', email: 'system@connect.app' });
-    
+
     if (!existingSystem) {
       const salt = generateSalt();
       const systemUser = new User({
@@ -1478,7 +1478,7 @@ const createSystemAccount = async () => {
           theme: 'white'
         }
       });
-      
+
       await systemUser.save();
       await createUserWallet(systemUser._id);
       console.log('✅ System account created successfully');
@@ -1506,7 +1506,7 @@ const createAdminUser = async () => {
       await adminUser.save();
       await createUserWallet(adminUser._id);
       console.log('✅ Admin user created');
-      
+
       const adminToken = generateAuthToken(adminUser._id);
       console.log('🔑 Admin Token:', adminToken);
     } else {
@@ -1520,14 +1520,14 @@ const createAdminUser = async () => {
 const createOfficialChat = async (userId) => {
   try {
     const systemUser = await User.findOne({ userType: 'system' });
-    
+
     if (!systemUser) {
       console.error('❌ System user not found');
       return;
     }
 
     const existingOfficialChats = await Chat.find({
-      participants: { 
+      participants: {
         $all: [userId, systemUser._id]
       },
       chatType: 'official',
@@ -1557,16 +1557,16 @@ const createOfficialChat = async (userId) => {
       console.log('✅ Official chat created for user:', userId);
     } else if (existingOfficialChats.length > 1) {
       console.log(`🔄 Found ${existingOfficialChats.length} official chats for user ${userId}, cleaning duplicates...`);
-      
+
       const latestChat = existingOfficialChats[0];
       const chatsToDelete = existingOfficialChats.slice(1);
-      
+
       for (const chat of chatsToDelete) {
         await Message.deleteMany({ chatId: chat._id });
         await Chat.deleteOne({ _id: chat._id });
         console.log(`🗑️ Deleted duplicate official chat: ${chat._id}`);
       }
-      
+
       console.log(`✅ Kept latest official chat: ${latestChat._id} for user: ${userId}`);
     } else {
       console.log('✅ Official chat already exists for user:', userId, 'chatId:', existingOfficialChats[0]._id);
@@ -1579,7 +1579,7 @@ const createOfficialChat = async (userId) => {
 const initializeMourningSettings = async () => {
   try {
     let mourningSettings = await MourningSettings.findOne({ type: 'mourning_settings' });
-    
+
     if (!mourningSettings) {
       mourningSettings = await MourningSettings.create({
         type: 'mourning_settings',
@@ -1623,14 +1623,14 @@ const sendRecoveryEmail = async (email, recoveryId, securityQuestion) => {
 const authenticateToken = async (req, res, next) => {
   try {
     const token = req.headers.authorization?.replace('Bearer ', '');
-    
+
     if (!token) {
       return res.status(401).json({ error: 'Access token required' });
     }
 
     const decoded = jwt.verify(token, JWT_SECRET);
     const user = await User.findById(decoded.userId);
-    
+
     if (!user) {
       return res.status(401).json({ error: 'Invalid token' });
     }
@@ -1692,7 +1692,7 @@ app.get('/api/wallet', authenticateToken, async (req, res) => {
     console.log('💰 Fetching wallet for user:', req.user._id);
 
     const wallet = await Wallet.findOne({ userId: req.user._id });
-    
+
     if (!wallet) {
       const newWallet = await createUserWallet(req.user._id);
       return res.json({
@@ -1705,8 +1705,8 @@ app.get('/api/wallet', authenticateToken, async (req, res) => {
       });
     }
 
-    const identityVerification = await IdentityVerification.findOne({ 
-      userId: req.user._id 
+    const identityVerification = await IdentityVerification.findOne({
+      userId: req.user._id
     });
 
     res.json({
@@ -1748,8 +1748,8 @@ app.get('/api/wallet/transactions', authenticateToken, async (req, res) => {
       });
     }
 
-    const transactions = await Transaction.find({ 
-      userId: req.user._id 
+    const transactions = await Transaction.find({
+      userId: req.user._id
     })
     .sort({ createdAt: -1 })
     .skip(skip)
@@ -1795,8 +1795,8 @@ app.get('/api/wallet/rewards', authenticateToken, async (req, res) => {
 
     console.log('🎁 Fetching rewards for user:', req.user._id);
 
-    const rewards = await Reward.find({ 
-      userId: req.user._id 
+    const rewards = await Reward.find({
+      userId: req.user._id
     })
     .sort({ createdAt: -1 })
     .skip(skip)
@@ -1944,13 +1944,13 @@ app.post('/api/identity/verify', authenticateToken, [
       });
     }
 
-    const { 
-      verificationMethod, 
-      documentNumber, 
-      fullName, 
-      birthDate, 
-      nationality, 
-      expiryDate 
+    const {
+      verificationMethod,
+      documentNumber,
+      fullName,
+      birthDate,
+      nationality,
+      expiryDate
     } = req.body;
 
     console.log('🆔 Starting identity verification for user:', req.user._id, {
@@ -1963,7 +1963,7 @@ app.post('/api/identity/verify', authenticateToken, [
     });
 
     // ✅ ตรวจสอบว่าผู้ใช้มีการยืนยันตัวตนที่กำลังดำเนินการหรือเสร็จสิ้นแล้ว
-    const existingVerification = await IdentityVerification.findOne({ 
+    const existingVerification = await IdentityVerification.findOne({
       userId: req.user._id,
       status: { $in: ['pending', 'verified'] }
     });
@@ -2052,7 +2052,7 @@ app.post('/api/identity/verify', authenticateToken, [
 
   } catch (error) {
     console.error('❌ Start identity verification error:', error);
-    
+
     // ✅ ให้ข้อมูล error ที่ละเอียดมากขึ้น
     let errorMessage = 'Failed to start identity verification';
     if (error.name === 'ValidationError') {
@@ -2124,7 +2124,7 @@ app.post('/api/identity/face-scan/:verificationId', authenticateToken, [
       identityVerification.faceScanData.scanResults.push(scanResult);
     }
 
-    identityVerification.faceScanData.stepsCompleted = 
+    identityVerification.faceScanData.stepsCompleted =
       identityVerification.faceScanData.scanResults.filter(
         result => result.status === 'completed'
       ).length;
@@ -2133,7 +2133,7 @@ app.post('/api/identity/face-scan/:verificationId', authenticateToken, [
       identityVerification.faceScanData.completedAt = new Date();
       identityVerification.status = 'verified';
       identityVerification.verifiedAt = new Date();
-      
+
       const wallet = await Wallet.findOne({ userId: req.user._id });
       if (wallet) {
         const rewardPoints = 100;
@@ -2190,8 +2190,8 @@ app.get('/api/identity/status', authenticateToken, async (req, res) => {
   try {
     console.log('🆔 Getting identity verification status for user:', req.user._id);
 
-    const identityVerification = await IdentityVerification.findOne({ 
-      userId: req.user._id 
+    const identityVerification = await IdentityVerification.findOne({
+      userId: req.user._id
     });
 
     if (!identityVerification) {
@@ -2280,7 +2280,7 @@ app.post('/api/bank/launch', authenticateToken, [
 
     console.log('💳 Launching bank service:', { bankCode, serviceType, userId: req.user._id });
 
-    const identityVerification = await IdentityVerification.findOne({ 
+    const identityVerification = await IdentityVerification.findOne({
       userId: req.user._id,
       status: 'verified'
     });
@@ -2292,9 +2292,9 @@ app.post('/api/bank/launch', authenticateToken, [
       });
     }
 
-    const bankService = await BankService.findOne({ 
+    const bankService = await BankService.findOne({
       code: bankCode,
-      isActive: true 
+      isActive: true
     });
 
     if (!bankService) {
@@ -2380,19 +2380,19 @@ app.post('/api/register', validateRegistration, async (req, res) => {
       });
     }
 
-    const { 
-      username, 
-      email, 
-      password, 
+    const {
+      username,
+      email,
+      password,
       phone,
-      language = 'en', 
+      language = 'en',
       theme = 'white',
       pdpa_consent,
       consent_timestamp
     } = req.body;
 
-    console.log('👤 User registration attempt:', { 
-      username, 
+    console.log('👤 User registration attempt:', {
+      username,
       email, 
       phone,
       pdpa_consent,
@@ -2420,7 +2420,7 @@ app.post('/api/register', validateRegistration, async (req, res) => {
         passwordSalt: salt,
         authToken,
         tokenExpiry: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-        settings: { 
+        settings: {
           language: language,
           theme: theme
         },
@@ -2486,7 +2486,7 @@ app.post('/api/login', validateLogin, async (req, res) => {
       if (user.failedLoginAttempts >= 5) {
         const lockoutTime = 15 * 60 * 1000;
         const timeSinceLastAttempt = Date.now() - (user.lastLogin?.getTime() || 0);
-        
+
         if (timeSinceLastAttempt < lockoutTime) {
           return res.status(429).json({
             success: false,
@@ -2500,7 +2500,7 @@ app.post('/api/login', validateLogin, async (req, res) => {
       const isValid = verifyPassword(password, user.passwordHash, user.passwordSalt);
       if (isValid) {
         const authToken = generateAuthToken(user._id);
-        
+
         user.authToken = authToken;
         user.tokenExpiry = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
         user.lastLogin = new Date();
@@ -2530,7 +2530,7 @@ app.post('/api/login', validateLogin, async (req, res) => {
         user.failedLoginAttempts += 1;
         user.lastLogin = new Date();
         await user.save();
-        
+
         console.log('❌ Invalid password for user:', email);
         return res.status(400).json({
           success: false,
@@ -2558,10 +2558,10 @@ app.post('/api/login', validateLogin, async (req, res) => {
 app.get('/api/profile', authenticateToken, async (req, res) => {
   try {
     console.log('📋 Profile request for user:', req.user._id);
-    
+
     const wallet = await Wallet.findOne({ userId: req.user._id });
     const identityVerification = await IdentityVerification.findOne({ userId: req.user._id });
-    
+
     res.json({
       success: true,
       user: {
@@ -2633,7 +2633,7 @@ app.put('/api/profile', authenticateToken, [
       });
     }
 
-    const { 
+    const {
       username, password, profilePicture, phone,
       coverImage, bio, aboutMe, jobTitle,
       hometown, currentAddress, birthDate,
@@ -2642,7 +2642,7 @@ app.put('/api/profile', authenticateToken, [
     } = req.body;
 
     console.log('👤 Updating profile for user:', req.user._id);
-    
+
     // --- Username Change Logic ---
     if (username && username.trim() !== req.user.username) {
       console.log(`🔄 Username change requested: from '${req.user.username}' to '${username.trim()}'`);
@@ -2764,9 +2764,9 @@ app.post('/api/recovery/create', authenticateToken, [
 
     console.log('🔑 Creating recovery ID for user:', userId);
 
-    const existingRecovery = await RecoveryId.findOne({ 
-      userId: userId, 
-      isActive: true 
+    const existingRecovery = await RecoveryId.findOne({
+      userId: userId,
+      isActive: true
     });
 
     if (existingRecovery) {
@@ -2816,9 +2816,9 @@ app.get('/api/recovery/info', authenticateToken, async (req, res) => {
 
     console.log('🔍 Getting recovery info for user:', userId);
 
-    const recoveryInfo = await RecoveryId.findOne({ 
-      userId: userId, 
-      isActive: true 
+    const recoveryInfo = await RecoveryId.findOne({
+      userId: userId,
+      isActive: true
     }).select('recoveryId securityQuestion createdAt');
 
     if (recoveryInfo) {
@@ -2872,9 +2872,9 @@ app.put('/api/recovery/update', authenticateToken, [
 
     console.log('🔄 Updating recovery ID for user:', userId);
 
-    const recoveryInfo = await RecoveryId.findOne({ 
-      userId: userId, 
-      isActive: true 
+    const recoveryInfo = await RecoveryId.findOne({
+      userId: userId,
+      isActive: true
     });
 
     if (!recoveryInfo) {
@@ -2885,8 +2885,8 @@ app.put('/api/recovery/update', authenticateToken, [
     }
 
     const isCurrentAnswerValid = verifyPassword(
-      currentAnswer.toLowerCase().trim(), 
-      recoveryInfo.securityAnswer, 
+      currentAnswer.toLowerCase().trim(),
+      recoveryInfo.securityAnswer,
       req.user.passwordSalt
     );
 
@@ -2941,9 +2941,9 @@ app.delete('/api/recovery/delete', authenticateToken, [
 
     console.log('🗑️ Deleting recovery ID for user:', userId);
 
-    const recoveryInfo = await RecoveryId.findOne({ 
-      userId: userId, 
-      isActive: true 
+    const recoveryInfo = await RecoveryId.findOne({
+      userId: userId,
+      isActive: true
     });
 
     if (!recoveryInfo) {
@@ -2954,8 +2954,8 @@ app.delete('/api/recovery/delete', authenticateToken, [
     }
 
     const isAnswerValid = verifyPassword(
-      securityAnswer.toLowerCase().trim(), 
-      recoveryInfo.securityAnswer, 
+      securityAnswer.toLowerCase().trim(),
+      recoveryInfo.securityAnswer,
       req.user.passwordSalt
     );
 
@@ -3012,9 +3012,9 @@ app.post('/api/recovery/account', [
 
     console.log('🔓 Account recovery attempt with ID:', recoveryId);
 
-    const recoveryInfo = await RecoveryId.findOne({ 
+    const recoveryInfo = await RecoveryId.findOne({
       recoveryId: recoveryId.toUpperCase().trim(),
-      isActive: true 
+      isActive: true
     }).populate('userId');
 
     if (!recoveryInfo || !recoveryInfo.userId) {
@@ -3027,8 +3027,8 @@ app.post('/api/recovery/account', [
     const user = recoveryInfo.userId;
 
     const isAnswerValid = verifyPassword(
-      securityAnswer.toLowerCase().trim(), 
-      recoveryInfo.securityAnswer, 
+      securityAnswer.toLowerCase().trim(),
+      recoveryInfo.securityAnswer,
       user.passwordSalt
     );
 
@@ -3081,9 +3081,9 @@ app.post('/api/recovery/verify', [
 
     console.log('🔍 Verifying recovery ID:', recoveryId);
 
-    const recoveryInfo = await RecoveryId.findOne({ 
+    const recoveryInfo = await RecoveryId.findOne({
       recoveryId: recoveryId.toUpperCase().trim(),
-      isActive: true 
+      isActive: true
     }).populate('userId', 'username email');
 
     if (!recoveryInfo || !recoveryInfo.userId) {
@@ -3130,9 +3130,9 @@ app.post('/api/recovery/verify-answer', [
 
     console.log('🔍 Verifying security answer for recovery ID:', recoveryId);
 
-    const recoveryInfo = await RecoveryId.findOne({ 
+    const recoveryInfo = await RecoveryId.findOne({
       recoveryId: recoveryId.toUpperCase().trim(),
-      isActive: true 
+      isActive: true
     }).populate('userId');
 
     if (!recoveryInfo || !recoveryInfo.userId) {
@@ -3145,8 +3145,8 @@ app.post('/api/recovery/verify-answer', [
     const user = recoveryInfo.userId;
 
     const isAnswerValid = verifyPassword(
-      securityAnswer.toLowerCase().trim(), 
-      recoveryInfo.securityAnswer, 
+      securityAnswer.toLowerCase().trim(),
+      recoveryInfo.securityAnswer,
       user.passwordSalt
     );
 
@@ -3183,7 +3183,7 @@ app.post('/api/recovery/verify-answer', [
 app.get('/api/chats/:chatId/profile', authenticateToken, async (req, res) => {
   try {
     const { chatId } = req.params;
-    
+
     console.log('📸 Fetching contact profile for chat:', chatId);
 
     const chat = await Chat.findOne({
@@ -3269,7 +3269,7 @@ app.post('/api/chats', authenticateToken, async (req, res) => {
     const { participants, isGroup, name, avatar, backgroundColor } = req.body; // ✅ รับค่าเพิ่ม
     const userId = req.user._id;
 
-    console.log('💬 Creating new chat request:', { 
+    console.log('💬 Creating new chat request:', {
       userId: userId,
       participants: participants,
       isGroup: isGroup,
@@ -3281,7 +3281,7 @@ app.post('/api/chats', authenticateToken, async (req, res) => {
     }
 
     // แปลง ID เป็น ObjectId
-    const users = await User.find({ 
+    const users = await User.find({
       $or: [
         { userId: { $in: participants } },
         { _id: { $in: participants.filter(id => mongoose.Types.ObjectId.isValid(id)) } }
@@ -3321,7 +3321,7 @@ app.post('/api/chats', authenticateToken, async (req, res) => {
       lastMessageTime: new Date(),
       createdBy: userId,
       // ถ้าคุณมี field สำหรับ avatar หรือ color ใน Schema ให้ใส่ตรงนี้
-      // avatar: avatar, 
+      // avatar: avatar,
       // backgroundColor: backgroundColor
     });
 
@@ -3365,9 +3365,9 @@ app.get('/api/chats/private/:friendId', authenticateToken, async (req, res) => {
     const { friendId } = req.params;
     const userId = req.user._id;
 
-    console.log('🔍 Finding private chat with friend:', { 
+    console.log('🔍 Finding private chat with friend:', {
       userId: userId,
-      friendId: friendId 
+      friendId: friendId
     });
 
     const friendUser = await User.findOne({
@@ -3503,13 +3503,13 @@ app.post('/api/friends/request', authenticateToken, async (req, res) => {
       });
     }
 
-    let targetUser = await User.findOne({ 
+    let targetUser = await User.findOne({
       userId: targetUserId,
-      isActive: true 
+      isActive: true
     });
-    
+
     if (!targetUser && mongoose.Types.ObjectId.isValid(targetUserId)) {
-      targetUser = await User.findOne({ 
+      targetUser = await User.findOne({
         _id: targetUserId,
         isActive: true 
       });
@@ -3787,7 +3787,7 @@ app.get('/api/friends', authenticateToken, async (req, res) => {
     const friends = friendRequests.map(request => {
       const isFromUser = request.fromUser._id.toString() === req.user._id.toString();
       const friendUser = isFromUser ? request.toUser : request.fromUser;
-      
+
       return {
         id: friendUser.userId || friendUser._id.toString(),
         name: friendUser.username,
@@ -4043,15 +4043,15 @@ app.get('/api/chats', authenticateToken, async (req, res) => {
 
     const officialChats = chats.filter(chat => chat.chatType === 'official');
     const normalChats = chats.filter(chat => chat.chatType !== 'official');
-    
+
     let finalChats = [...normalChats];
-    
+
     if (officialChats.length > 0) {
-      const sortedOfficialChats = officialChats.sort((a, b) => 
+      const sortedOfficialChats = officialChats.sort((a, b) =>
         new Date(b.lastMessageTime) - new Date(a.lastMessageTime)
       );
       finalChats.unshift(sortedOfficialChats[0]);
-      
+
       if (officialChats.length > 1) {
         console.log(`🔥 Filtered official chats: 1 (was ${officialChats.length}) for user: ${req.user._id}`);
       }
@@ -4073,7 +4073,7 @@ app.get('/api/chats', authenticateToken, async (req, res) => {
           chatName = otherParticipant.username;
           profilePicture = otherParticipant.profilePicture;
         }
-      } 
+      }
       // ถ้าเป็นกลุ่ม ให้ใช้ชื่อกลุ่ม (chat.title) ซึ่งถูกต้องแล้ว
 
       return {
@@ -4174,7 +4174,7 @@ app.post('/api/chat/push-notification', authenticateToken, async (req, res) => {
 app.get('/api/chats/:chatId/messages', authenticateToken, async (req, res) => {
   try {
     const { chatId } = req.params;
-    
+
     console.log('📨 Fetching messages for chat:', chatId);
 
     const chat = await Chat.findOne({
@@ -4183,7 +4183,7 @@ app.get('/api/chats/:chatId/messages', authenticateToken, async (req, res) => {
     });
 
     if (chat) {
-      const messages = await Message.find({ 
+      const messages = await Message.find({
         chatId,
         isDeleted: false
       })
@@ -4193,7 +4193,7 @@ app.get('/api/chats/:chatId/messages', authenticateToken, async (req, res) => {
       const formattedMessages = messages.map(msg => {
         const isMe = msg.senderId._id.toString() === req.user._id.toString();
         const isSystem = msg.senderId.userType === 'system';
-        
+
         return {
           id: msg._id,
           sender: msg.senderId.username,
@@ -4256,9 +4256,9 @@ app.post('/api/chats/:chatId/messages', authenticateToken, async (req, res) => {
 
       chat.lastMessage = content;
       chat.lastMessageTime = new Date();
-      
+
       chat.unreadCount.set(req.user._id.toString(), 0);
-      
+
       chat.participants.forEach(participantId => {
         if (participantId.toString() !== req.user._id.toString()) {
           const currentCount = chat.unreadCount.get(participantId.toString()) || 0;
@@ -4319,7 +4319,7 @@ app.post('/api/chats/:chatId/messages', authenticateToken, async (req, res) => {
 app.put('/api/chats/:chatId/messages/:messageId/delete', authenticateToken, async (req, res) => {
   try {
     const { chatId, messageId } = req.params;
-    
+
     console.log('🗑️ Soft deleting message:', messageId, 'from chat:', chatId);
 
     const chat = await Chat.findOne({
@@ -4388,7 +4388,7 @@ app.put('/api/chats/:chatId/messages/:messageId', authenticateToken, async (req,
   try {
     const { chatId, messageId } = req.params;
     const { content } = req.body;
-    
+
     console.log('✏️ Updating message:', messageId, 'from chat:', chatId);
 
     const chat = await Chat.findOne({
@@ -4465,7 +4465,7 @@ app.post('/api/chats/:chatId/typing', authenticateToken, async (req, res) => {
   try {
     const { chatId } = req.params;
     const { isTyping } = req.body;
-    
+
     // In a real-time app with Socket.io, you would emit this event.
     // For REST API, we just acknowledge the request.
     // You could potentially store this in Redis or DB if polling is used.
@@ -4502,14 +4502,14 @@ app.get('/api/search', authenticateToken, async (req, res) => {
 // 📱 Get User Notifications
 app.get('/api/notifications', authenticateToken, async (req, res) => {
   try {
-    const { 
-      page = 1, 
+    const {
+      page = 1,
       limit = 20,
       type,
       unreadOnly = false,
       archived = false
     } = req.query;
-    
+
     const skip = (page - 1) * limit;
 
     console.log('📨 Fetching notifications for user:', req.user._id, {
@@ -4558,7 +4558,7 @@ app.get('/api/notifications', authenticateToken, async (req, res) => {
         'system_alert': '⚡',
         'reward_earned': '🎁'
       };
-      
+
       return badges[type] || '🔔';
     }
 
@@ -4624,7 +4624,7 @@ app.put('/api/notifications/:id/read', authenticateToken, async (req, res) => {
       notification.isRead = true;
       notification.readAt = new Date();
       await notification.save();
-      
+
       console.log('✅ Notification marked as read');
     }
 
@@ -4803,7 +4803,7 @@ app.get('/api/notifications/new', authenticateToken, async (req, res) => {
   try {
     const { since } = req.query;
     const query = { userId: req.user._id, isRead: false };
-    
+
     if (since && typeof since === 'string') {
       query.createdAt = { $gt: new Date(since) };
     }
@@ -4823,9 +4823,9 @@ app.get('/api/notifications/type/:type', authenticateToken, async (req, res) => 
     const { page = 1, limit = 20 } = req.query;
     const skip = (page - 1) * limit;
 
-    const notifications = await Notification.find({ 
-      userId: req.user._id, 
-      type: type 
+    const notifications = await Notification.find({
+      userId: req.user._id,
+      type: type
     })
     .sort({ createdAt: -1 })
     .skip(skip)
@@ -4877,12 +4877,12 @@ app.post('/api/logout', authenticateToken, async (req, res) => {
 app.get('/api/settings', async (req, res) => {
   try {
     console.log('📥 Received request for app settings');
-    
+
     let settings = await AppSettings.findOne({ type: 'default_settings' });
-    
+
     if (!settings) {
       console.log('🆕 Creating new default settings');
-      settings = await AppSettings.create({ 
+      settings = await AppSettings.create({
         type: 'default_settings',
         language: 'en',
         theme: 'white'
@@ -4891,13 +4891,13 @@ app.get('/api/settings', async (req, res) => {
 
     const mourningSettings = await MourningSettings.findOne({ type: 'mourning_settings' });
     const isMourning = mourningSettings?.isMourningPeriod || false;
-    
+
     console.log('✅ Sending app settings with mourning status:', {
       language: settings.language,
       theme: settings.theme,
       isMourning: isMourning
     });
-    
+
     res.json({
       success: true,
       settings: {
@@ -4931,9 +4931,9 @@ app.get('/api/settings', async (req, res) => {
 app.get('/api/mourning', async (req, res) => {
   try {
     console.log('⚫ Received request for mourning settings');
-    
+
     let mourningSettings = await MourningSettings.findOne({ type: 'mourning_settings' });
-    
+
     if (!mourningSettings) {
       mourningSettings = await MourningSettings.create({
         type: 'mourning_settings',
@@ -4973,16 +4973,16 @@ app.put('/api/mourning', authenticateToken, async (req, res) => {
     }
 
     const { isMourningPeriod, mourningMessage, mourningTheme, startDate, endDate } = req.body;
-    
-    console.log('⚫ Updating mourning settings:', { 
-      isMourningPeriod, 
+
+    console.log('⚫ Updating mourning settings:', {
+      isMourningPeriod,
       mourningMessage,
-      mourningTheme 
+      mourningTheme
     });
 
     const mourningSettings = await MourningSettings.findOneAndUpdate(
       { type: 'mourning_settings' },
-      { 
+      {
         isMourningPeriod: isMourningPeriod || false,
         mourningMessage: mourningMessage || '',
         mourningTheme: mourningTheme || 'black_ribbon',
@@ -5008,9 +5008,9 @@ app.put('/api/mourning', authenticateToken, async (req, res) => {
     });
   } catch (error) {
     console.error('❌ Update mourning settings error:', error);
-    res.status(500).json({ 
+    res.status(500).json({
       success: false,
-      error: 'Failed to update mourning settings' 
+      error: 'Failed to update mourning settings'
     });
   }
 });
@@ -5019,24 +5019,24 @@ app.put('/api/mourning', authenticateToken, async (req, res) => {
 app.put('/api/settings', async (req, res) => {
   try {
     const { language, theme } = req.body;
-    
+
     console.log('📝 Updating app settings:', { language, theme });
-    
+
     const settings = await AppSettings.findOneAndUpdate(
       { type: 'default_settings' },
-      { 
+      {
         language: language || 'en',
-        theme: theme || 'white', 
+        theme: theme || 'white',
         updatedAt: new Date()
       },
       { new: true, upsert: true }
     );
-    
+
     console.log('✅ App settings updated successfully:', {
       language: settings.language,
       theme: settings.theme
     });
-    
+
     res.json({
       success: true,
       settings: {
@@ -5046,9 +5046,9 @@ app.put('/api/settings', async (req, res) => {
     });
   } catch (error) {
     console.error('❌ Update settings error:', error);
-    res.status(500).json({ 
+    res.status(500).json({
       success: false,
-      error: 'Failed to update settings' 
+      error: 'Failed to update settings'
     });
   }
 });
@@ -5058,10 +5058,10 @@ app.put('/api/user/settings', authenticateToken, async (req, res) => {
   try {
     const { language, theme } = req.body;
 
-    console.log('⚙️ Updating user settings:', { 
-      userId: req.user._id, 
-      language, 
-      theme 
+    console.log('⚙️ Updating user settings:', {
+      userId: req.user._id,
+      language,
+      theme
     });
 
     req.user.settings.language = language || req.user.settings.language;
@@ -5102,8 +5102,8 @@ app.put('/api/user/notification-settings', authenticateToken, async (req, res) =
 // 🔔 Get Notification Settings
 app.get('/api/user/notification-settings', authenticateToken, async (req, res) => {
   try {
-    res.json({ 
-      success: true, 
+    res.json({
+      success: true,
       settings: req.user.notificationSettings || {
         chatNotifications: true, friendRequestNotifications: true, systemNotifications: true, soundEnabled: true, vibrationEnabled: true
       }
@@ -5215,7 +5215,7 @@ app.get('/api/user/fcm-token/status', authenticateToken, async (req, res) => {
     });
 
     const hasToken = !!req.user.fcmToken;
-    const tokenAge = hasToken ? 
+    const tokenAge = hasToken ?
       Math.floor((Date.now() - req.user.updatedAt) / (1000 * 60 * 60 * 24)) : 0;
 
     res.json({
@@ -5407,9 +5407,9 @@ app.put('/api/user/change-id', authenticateToken, [
       newUserId: newUserId
     });
 
-    const existingUser = await User.findOne({ 
+    const existingUser = await User.findOne({
       _id: { $ne: req.user._id },
-      userId: newUserId 
+      userId: newUserId
     });
 
     if (!existingUser) {
@@ -5476,7 +5476,7 @@ app.post('/api/user/change-email', authenticateToken, [
       newEmail: newEmail
     });
 
-    const existingUser = await User.findOne({ 
+    const existingUser = await User.findOne({
       _id: { $ne: req.user._id },
       email: newEmail.toLowerCase().trim()
     });
@@ -5529,13 +5529,13 @@ app.get('/api/user/id-change-status', authenticateToken, async (req, res) => {
 
     if (req.user.lastUserIdChange) {
       const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-      
+
       if (req.user.lastUserIdChange > thirtyDaysAgo) {
         canChange = false;
         const timeDiff = req.user.lastUserIdChange.getTime() - thirtyDaysAgo.getTime();
         daysLeft = Math.ceil(timeDiff / (24 * 60 * 60 * 1000));
       }
-      
+
       lastChange = req.user.lastUserIdChange;
     }
 
@@ -5569,7 +5569,7 @@ app.post('/api/profile/picture', authenticateToken, async (req, res) => {
       if (imageData.startsWith('data:image/')) {
         const base64Data = imageData.replace(/^data:image\/\w+;base64,/, '');
         const buffer = Buffer.from(base64Data, 'base64');
-        
+
         if (buffer.length <= 2 * 1024 * 1024) {
           req.user.profilePicture = imageData;
           req.user.updatedAt = new Date();
@@ -5619,10 +5619,10 @@ app.post('/api/profile/picture', authenticateToken, async (req, res) => {
 app.post('/api/groups', authenticateToken, async (req, res) => {
   try {
     const { name, members, description, groupPicture } = req.body;
-    
+
     // Convert member IDs to ObjectIds and include creator
     const participantIds = [...new Set([...members, req.user._id.toString()])];
-    
+
     const newGroup = new Chat({
       participants: participantIds,
       chatType: 'group',
@@ -5658,9 +5658,9 @@ app.get('/api/groups/:id', authenticateToken, async (req, res) => {
     const chat = await Chat.findOne({ _id: req.params.id, chatType: 'group' })
       .populate('participants', 'username profilePicture')
       .populate('admins', 'username');
-    
+
     if (!chat) return res.status(404).json({ success: false, error: 'Group not found' });
-    
+
     res.json({ success: true, group: chat });
   } catch (error) {
     res.status(500).json({ success: false, error: 'Failed to get group info' });
@@ -5719,7 +5719,7 @@ app.get('/api/groups/:id/members', authenticateToken, async (req, res) => {
 app.put('/api/groups/:id', authenticateToken, async (req, res) => {
   try {
     const { name, description, groupPicture } = req.body;
-    
+
 
     const chat = await Chat.findOne({ _id: req.params.id, chatType: 'group' });
     if (!chat) return res.status(404).json({ success: false, error: 'Group not found' });
@@ -5727,7 +5727,7 @@ app.put('/api/groups/:id', authenticateToken, async (req, res) => {
     // Check if admin
     const isAdmin = chat.admins && chat.admins.some(id => id.toString() === req.user._id.toString());
     const isCreator = chat.createdBy && chat.createdBy.toString() === req.user._id.toString();
-    
+
 
     if (!isAdmin && !isCreator) {
       return res.status(403).json({ success: false, error: 'Only admins can update group settings' });
@@ -5749,13 +5749,13 @@ app.post('/api/groups/:id/members', authenticateToken, async (req, res) => {
   try {
     const { memberIds } = req.body;
     const chat = await Chat.findById(req.params.id);
-    
+
     if (!chat) return res.status(404).json({ success: false, error: 'Group not found' });
-    
+
     // Add new members
     chat.participants = [...new Set([...chat.participants.map(p => p.toString()), ...memberIds])];
     await chat.save();
-    
+
     res.json({ success: true, message: 'Members added' });
   } catch (error) {
     res.status(500).json({ success: false, error: 'Failed to add members' });
@@ -5767,12 +5767,12 @@ app.delete('/api/groups/:id/members', authenticateToken, async (req, res) => {
   try {
     const { memberIds } = req.body;
     const chat = await Chat.findById(req.params.id);
-    
+
     if (!chat) return res.status(404).json({ success: false, error: 'Group not found' });
-    
+
     chat.participants = chat.participants.filter(p => !memberIds.includes(p.toString()));
     await chat.save();
-    
+
     res.json({ success: true, message: 'Members removed' });
   } catch (error) {
     res.status(500).json({ success: false, error: 'Failed to remove members' });
@@ -5784,10 +5784,10 @@ app.post('/api/groups/:id/leave', authenticateToken, async (req, res) => {
   try {
     const chat = await Chat.findById(req.params.id);
     if (!chat) return res.status(404).json({ success: false, error: 'Group not found' });
-    
+
     chat.participants = chat.participants.filter(p => p.toString() !== req.user._id.toString());
     await chat.save();
-    
+
     res.json({ success: true, message: 'Left group successfully' });
   } catch (error) {
     res.status(500).json({ success: false, error: 'Failed to leave group' });
@@ -5801,9 +5801,9 @@ app.post('/api/groups/:id/delete', authenticateToken, async (req, res) => {
     console.log(`🗑️ Deleting group ${req.params.id}. Reason: ${reason}, Satisfaction: ${satisfaction}`);
 
     const chat = await Chat.findOne({ _id: req.params.id, chatType: 'group' });
-    
+
     if (!chat) return res.status(404).json({ success: false, error: 'Group not found' });
-    
+
     // Check if admin
     const isAdmin = chat.admins && chat.admins.some(id => id.toString() === req.user._id.toString());
     const isCreator = chat.createdBy && chat.createdBy.toString() === req.user._id.toString();
@@ -5829,7 +5829,7 @@ app.delete('/api/groups/:id', authenticateToken, async (req, res) => {
   try {
     const chat = await Chat.findOne({ _id: req.params.id, chatType: 'group' });
     if (!chat) return res.status(404).json({ success: false, error: 'Group not found' });
-    
+
     // Check if admin
     const isAdmin = chat.admins && chat.admins.some(id => id.toString() === req.user._id.toString());
     const isCreator = chat.createdBy && chat.createdBy.toString() === req.user._id.toString();
@@ -5840,7 +5840,7 @@ app.delete('/api/groups/:id', authenticateToken, async (req, res) => {
 
     await Message.deleteMany({ chatId: chat._id });
     await Chat.deleteOne({ _id: chat._id });
-    
+
     res.json({ success: true, message: 'Group deleted' });
   } catch (error) {
     res.status(500).json({ success: false, error: 'Failed to delete group' });
@@ -5850,11 +5850,11 @@ app.delete('/api/groups/:id', authenticateToken, async (req, res) => {
 // 👥 Get User Groups
 app.get('/api/groups', authenticateToken, async (req, res) => {
   try {
-    const groups = await Chat.find({ 
-      participants: req.user._id, 
-      chatType: 'group' 
+    const groups = await Chat.find({
+      participants: req.user._id,
+      chatType: 'group'
     }).sort({ lastMessageTime: -1 });
-    
+
     res.json({ success: true, groups });
   } catch (error) {
     res.status(500).json({ success: false, error: 'Failed to get groups' });
@@ -5871,7 +5871,7 @@ app.get('/api/groups/:id/messages', authenticateToken, async (req, res) => {
     const messages = await Message.find({ chatId: req.params.id, isDeleted: false })
       .populate('senderId', 'username profilePicture')
       .sort({ timestamp: 1 });
-      
+
     const formattedMessages = messages.map(msg => ({
       id: msg._id,
       sender: msg.senderId.username,
@@ -5881,7 +5881,7 @@ app.get('/api/groups/:id/messages', authenticateToken, async (req, res) => {
       messageType: msg.messageType,
       profilePicture: msg.senderId.profilePicture
     }));
-    
+
     res.json({ success: true, messages: formattedMessages });
   } catch (error) {
     res.status(500).json({ success: false, error: 'Failed to get messages' });
@@ -5900,7 +5900,7 @@ app.post('/api/groups/:id/messages', authenticateToken, async (req, res) => {
       // If you add fileUrl/fileName to Message schema, save them here
     });
     await newMessage.save();
-    
+
     // Update chat last message
     await Chat.findByIdAndUpdate(req.params.id, {
       lastMessage: messageType === 'text' ? content : `Sent a ${messageType}`,
@@ -5928,7 +5928,7 @@ app.post('/api/groups/:id/picture', authenticateToken, async (req, res) => {
 app.put('/api/groups/:id/members/roles', authenticateToken, async (req, res) => {
   try {
     const { memberIds, roles } = req.body;
-    
+
     if (!memberIds || !roles || !Array.isArray(memberIds) || !Array.isArray(roles) || memberIds.length !== roles.length) {
       return res.status(400).json({ success: false, error: 'Invalid input: memberIds and roles must be arrays of equal length' });
     }
@@ -5947,7 +5947,7 @@ app.put('/api/groups/:id/members/roles', authenticateToken, async (req, res) => 
     // Update roles
     memberIds.forEach((memberId, index) => {
       const role = roles[index];
-      
+
       // Ensure member is part of the group
       if (chat.participants.some(p => p.toString() === memberId)) {
         if (role === 'admin') {
@@ -5963,7 +5963,7 @@ app.put('/api/groups/:id/members/roles', authenticateToken, async (req, res) => 
     });
 
     await chat.save();
-    
+
     res.json({ success: true, message: 'Member roles updated successfully' });
   } catch (error) {
     console.error('❌ Update member roles error:', error);
@@ -6071,7 +6071,7 @@ app.delete('/api/files/:fileId', authenticateToken, async (req, res) => {
 app.post('/api/cloudinary/signature', authenticateToken, (req, res) => {
   try {
     const timestamp = Math.round((new Date).getTime() / 1000);
-    
+
     // ✅ ดึงค่าจาก .env
     const apiSecret = process.env.CLOUDINARY_API_SECRET;
     if (!apiSecret) {
@@ -6082,7 +6082,7 @@ app.post('/api/cloudinary/signature', authenticateToken, (req, res) => {
     // ✅ สร้าง string ที่จะใช้ในการ sign
     // ต้องเรียงตามตัวอักษร: folder มาก่อน timestamp
     const stringToSign = `folder=chatchat_media&timestamp=${timestamp}${apiSecret}`;
-    
+
     // ✅ สร้าง signature ด้วย SHA-1
     const signature = crypto.createHash('sha1').update(stringToSign).digest('hex');
 
@@ -6107,7 +6107,7 @@ app.post('/api/cloudinary/signature', authenticateToken, (req, res) => {
 // 💾 POST /api/media/metadata - Save metadata after direct upload (เพิ่มใหม่)
 app.post('/api/media/metadata', authenticateToken, async (req, res) => {
   try {
-    const { 
+    const {
       uploadId,
       publicId,
       fileName,
@@ -6258,6 +6258,53 @@ app.get('/api/videos/feed', authenticateToken, async (req, res) => {
   }
 });
 
+// 🎬 Get Single Video/Media by ID
+app.get('/api/media/:id', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    console.log('🎬 Fetching single media item:', id);
+
+    const media = await MediaUpload.findOne({
+        $or: [{ uploadId: id }, { _id: mongoose.Types.ObjectId.isValid(id) ? id : null }]
+    })
+      .populate('userId', 'username profilePicture userId')
+      .lean();
+
+    if (!media) {
+      return res.status(404).json({ success: false, error: 'Media not found' });
+    }
+
+    const isOwner = media.userId && media.userId._id.toString() === req.user._id.toString();
+    if (media.visibility === 'private' && !isOwner) {
+        return res.status(403).json({ success: false, error: 'This content is private' });
+    }
+
+    const formattedMedia = {
+      id: media.uploadId,
+      _id: media._id,
+      title: media.title,
+      description: media.description,
+      videoUrl: media.fileUrl || null,
+      thumbnailUrl: media.thumbnailUrl || null,
+      fileType: media.fileType,
+      duration: media.duration,
+      uploader: media.userId ? {
+        id: media.userId.userId || media.userId._id,
+        username: media.userId.username,
+        profilePicture: media.userId.profilePicture
+      } : null,
+      isMine: isOwner,
+      likesCount: media.likesCount || 0,
+    };
+
+    res.json({ success: true, media: formattedMedia });
+
+  } catch (error) {
+    console.error('❌ Get single media error:', error);
+    res.status(500).json({ success: false, error: 'Failed to fetch media' });
+  }
+});
+
 // 🗑️ Delete Video
 app.delete('/api/videos/:videoId', authenticateToken, async (req, res) => {
   try {
@@ -6280,7 +6327,7 @@ app.delete('/api/videos/:videoId', authenticateToken, async (req, res) => {
       const resourceType = media.mimeType.startsWith('video') ? 'video' : 'image';
       await cloudinary.uploader.destroy(media.publicId, { resource_type: resourceType });
       console.log('✅ File deleted from Cloudinary:', media.publicId);
-    } 
+    }
     // Fallback for old, locally stored files
     else if (media.filePath && fs.existsSync(media.filePath)) {
       fs.unlink(media.filePath, (err) => {
@@ -6318,11 +6365,11 @@ app.post('/api/upload/media', authenticateToken, mediaUpload.single('file'), asy
     }
 
     // ✅ รับค่าพารามิเตอร์ใหม่ๆ จาก Client
-    const { 
-      fileName, 
-      fileType, 
-      title, 
-      description, 
+    const {
+      fileName,
+      fileType,
+      title,
+      description,
       visibility,
       commentPermission,
       shareToStory,
@@ -6350,7 +6397,7 @@ app.post('/api/upload/media', authenticateToken, mediaUpload.single('file'), asy
     }
 
     const uploadId = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    
+
     // ✅ Get URLs and public_id from Cloudinary response
     const fileUrl = req.file.path;
     const publicId = req.file.filename;
@@ -6421,7 +6468,7 @@ app.post('/api/upload/media', authenticateToken, mediaUpload.single('file'), asy
       fileUrl: finalFileUrl,  // ✅ ใช้ URL ที่ปรับแต่งแล้ว
       thumbnailUrl: thumbnailUrl, // ✅ Save thumbnail URL
       status: 'completed',
-      
+
       // ✅ บันทึกค่า Settings ลงฐานข้อมูล
       visibility: visibility || 'public',
       commentPermission: commentPermission || 'public',
@@ -6429,7 +6476,7 @@ app.post('/api/upload/media', authenticateToken, mediaUpload.single('file'), asy
       shareToGroups: parsedGroups.filter(id => mongoose.Types.ObjectId.isValid(id)),
       scheduledTime: scheduledTime ? new Date(scheduledTime) : null,
       collaborators: parsedCollaborators.filter(id => mongoose.Types.ObjectId.isValid(id)),
-      
+
       uploadProgress: 100,
       completedAt: new Date()
     });
@@ -6481,7 +6528,7 @@ app.post('/api/upload/media', authenticateToken, mediaUpload.single('file'), asy
       code: error.code,
       fullError: JSON.stringify(error, null, 2)
     });
-    
+
     // ✅ Clean up uploaded file from Cloudinary on error
     if (req.file) {
       try {
@@ -6491,11 +6538,11 @@ app.post('/api/upload/media', authenticateToken, mediaUpload.single('file'), asy
         console.error('❌ Error deleting file from Cloudinary:', destroyError.message);
       }
     }
-    
-    res.status(500).json({ 
-      success: false, 
+
+    res.status(500).json({
+      success: false,
       error: 'Media upload failed: ' + error.message,
-      details: error.code || error.name 
+      details: error.code || error.name
     });
   }
 }, (err, req, res, next) => {
@@ -6505,7 +6552,7 @@ app.post('/api/upload/media', authenticateToken, mediaUpload.single('file'), asy
     code: err.code,
     field: err.field
   });
-  
+
   res.status(400).json({
     success: false,
     error: 'File upload error: ' + err.message
@@ -6593,7 +6640,7 @@ app.post('/api/upload/cancel/:uploadId', authenticateToken, async (req, res) => 
     if (mediaUpload) {
       mediaUpload.status = 'cancelled';
       mediaUpload.cancelledAt = new Date();
-      
+
       // Delete file if it exists
       if (fs.existsSync(mediaUpload.filePath)) {
         try {
@@ -6629,14 +6676,14 @@ app.post('/api/upload/cancel/:uploadId', authenticateToken, async (req, res) => 
 // Create Story
 app.post('/api/stories', authenticateToken, async (req, res) => {
   try {
-    const { 
-      type = 'text', 
-      backgroundColor, 
-      textItems, 
-      stickers, 
-      visibility = 'public', 
-      specificViewers, 
-      allowComments = true, 
+    const {
+      type = 'text',
+      backgroundColor,
+      textItems,
+      stickers,
+      visibility = 'public',
+      specificViewers,
+      allowComments = true,
       mediaUrl,
       thumbnailUrl
     } = req.body;
@@ -6689,7 +6736,7 @@ app.get('/api/stories/feed', authenticateToken, async (req, res) => {
       ]
     });
 
-    const friendIds = friendships.map(f => 
+    const friendIds = friendships.map(f =>
       f.fromUser.toString() === req.user._id.toString() ? f.toUser : f.fromUser
     );
 
@@ -6708,7 +6755,7 @@ app.get('/api/stories/feed', authenticateToken, async (req, res) => {
     // Filter by visibility
     const visibleStories = stories.filter(story => {
       if (story.userId._id.toString() === req.user._id.toString()) return true;
-      
+
       if (story.visibility === 'public') return true;
       if (story.visibility === 'friends') return true; // We already filtered by friendIds
       if (story.visibility === 'specific') {
@@ -6809,7 +6856,7 @@ app.post('/api/stories/:id/view', authenticateToken, async (req, res) => {
 app.post('/api/agora/token', authenticateToken, async (req, res) => {
   try {
     const { channelName, uid = 0 } = req.body;
-    
+
     console.log('🎥 Agora token request:', {
       userId: req.user._id,
       channelName: channelName,
@@ -6848,23 +6895,23 @@ app.post('/api/agora/token', authenticateToken, async (req, res) => {
         });
       } else {
         console.error('❌ Agora certificate not configured');
-        return res.status(500).json({ 
-          success: false, 
-          error: 'Agora service not configured' 
+        return res.status(500).json({
+          success: false,
+          error: 'Agora service not configured'
         });
       }
     } else {
-      return res.status(400).json({ 
-        success: false, 
-        error: 'Channel name is required' 
+      return res.status(400).json({
+        success: false,
+        error: 'Channel name is required'
       });
     }
 
   } catch (error) {
     console.error('❌ Agora token generation error:', error);
-    res.status(500).json({ 
-      success: false, 
-      error: 'Failed to generate token: ' + error.message 
+    res.status(500).json({
+      success: false,
+      error: 'Failed to generate token: ' + error.message
     });
   }
 });
@@ -6898,7 +6945,7 @@ app.get('/api/admin/official-chats-status', authenticateToken, async (req, res) 
     const duplicateUsers = [];
 
     officialChats.forEach(chat => {
-      const normalUsers = chat.participants.filter(p => 
+      const normalUsers = chat.participants.filter(p =>
         p._id.toString() !== systemUser._id.toString() && p.userType !== 'system'
       );
 
@@ -6980,13 +7027,13 @@ app.delete('/api/admin/clean-duplicate-official-chats', authenticateToken, async
     const chatsToDelete = [];
 
     officialChats.forEach(chat => {
-      const normalUsers = chat.participants.filter(p => 
+      const normalUsers = chat.participants.filter(p =>
         p._id.toString() !== systemUser._id.toString() && p.userType !== 'system'
       );
 
       normalUsers.forEach(user => {
         const userKey = user._id.toString();
-        
+
         if (userChatMap.has(userKey)) {
           const existingChat = userChatMap.get(userKey);
           if (chat.createdAt > existingChat.createdAt) {
@@ -7059,14 +7106,14 @@ app.delete('/api/admin/force-clean-duplicates', authenticateToken, async (req, r
     const allChatsToDelete = [];
 
     officialChats.forEach(chat => {
-      const normalUsers = chat.participants.filter(p => 
+      const normalUsers = chat.participants.filter(p =>
         p._id.toString() !== systemUser._id.toString() && p.userType !== 'system'
       );
 
       normalUsers.forEach(user => {
         const userKey = user._id.toString();
         const existingChat = userLatestChatMap.get(userKey);
-        
+
         if (!existingChat || chat.createdAt > existingChat.createdAt) {
           if (existingChat) {
             allChatsToDelete.push(existingChat._id);
@@ -7143,14 +7190,14 @@ app.get('/api/health', (req, res) => {
 app.get('/api/app/version', async (req, res) => {
   try {
     console.log('📱 App version check request');
-    
+
     // ข้อมูลเวอร์ชั่นปัจจุบันในระบบ
     const currentVersion = "1.0.0"; // เวอร์ชั่นปัจจุบันของแอป
     const latestVersion = "1.1.0";  // เวอร์ชั่นล่าสุดที่ใช้แสดงในป๊อปอัพ
-    
+
     // กำหนดว่ามีอัพเดทใหม่หรือไม่ (สามารถเปลี่ยนเป็น true เมื่อต้องการให้แสดงป๊อปอัพ)
     const updateAvailable = true; // เปลี่ยนเป็น false เมื่อไม่มีอัพเดท
-    
+
     if (updateAvailable) {
       res.json({
         success: true,
@@ -7188,13 +7235,13 @@ app.get('/api/app/version', async (req, res) => {
         last_checked: new Date().toISOString()
       });
     }
-    
-    console.log('✅ Version check response sent:', { 
+
+    console.log('✅ Version check response sent:', {
       update_available: updateAvailable,
       current_version: currentVersion,
-      latest_version: latestVersion 
+      latest_version: latestVersion
     });
-    
+
   } catch (error) {
     console.error('❌ App version check error:', error);
     res.status(500).json({
@@ -7216,13 +7263,13 @@ app.post('/api/admin/app-version', authenticateToken, async (req, res) => {
       });
     }
 
-    const { 
-      version, 
-      update_available, 
-      features, 
-      download_url, 
+    const {
+      version,
+      update_available,
+      features,
+      download_url,
       update_type,
-      release_notes 
+      release_notes
     } = req.body;
 
     console.log('👨‍💼 Admin updating app version settings:', {
@@ -7287,13 +7334,13 @@ app.post('/api/admin/app-version', authenticateToken, async (req, res) => {
 app.get('/api/app/version/status', async (req, res) => {
   try {
     console.log('📊 App version status check');
-    
+
     // นับจำนวนผู้ใช้ที่อัพเดทแล้ว
     const thirtyDaysAgo = new Date();
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-    
+
     const totalUsers = await User.countDocuments({ isActive: true });
-    const recentLogins = await User.countDocuments({ 
+    const recentLogins = await User.countDocuments({
       isActive: true,
       lastLogin: { $gte: thirtyDaysAgo }
     });
@@ -7328,9 +7375,9 @@ app.get('/api/app/version/status', async (req, res) => {
 app.post('/api/webhooks/github/release', async (req, res) => {
   try {
     console.log('🔄 GitHub release webhook received');
-    
+
     const { action, release } = req.body;
-    
+
     if (action === 'released' && release) {
       console.log('🎉 New GitHub release detected:', {
         tag_name: release.tag_name,
@@ -7340,7 +7387,7 @@ app.post('/api/webhooks/github/release', async (req, res) => {
 
       // บันทึกข้อมูลการปล่อยเวอร์ชั่นใหม่
       // สามารถบันทึกลงใน database ได้ถ้าต้องการเก็บประวัติ
-      
+
       res.json({
         success: true,
         message: 'GitHub release webhook processed successfully',
@@ -7370,17 +7417,17 @@ app.post('/api/webhooks/github/release', async (req, res) => {
 // 📊 Analytics Routes
 app.get('/api/analytics/user', authenticateToken, async (req, res) => {
   // Mock analytics
-  res.json({ 
-    success: true, 
-    stats: { messagesSent: 100, groupsJoined: 5, friendsCount: 10 } 
+  res.json({
+    success: true,
+    stats: { messagesSent: 100, groupsJoined: 5, friendsCount: 10 }
   });
 });
 
 app.get('/api/analytics/chat/:chatId', authenticateToken, async (req, res) => {
   // Mock analytics
-  res.json({ 
-    success: true, 
-    stats: { totalMessages: 500, activeMembers: 10, lastActivity: new Date() } 
+  res.json({
+    success: true,
+    stats: { totalMessages: 500, activeMembers: 10, lastActivity: new Date() }
   });
 });
 
@@ -7408,8 +7455,8 @@ app.use('*', (req, res) => {
 const startServer = async () => {
   await initializeMourningSettings();
   await initializeBankServices();
-  
-  app.listen(PORT, '0.0.0.0', () => {  
+
+  app.listen(PORT, '0.0.0.0', () => {
     console.log('🚀 =================================');
     console.log('📡 Connect API Server Started!');
     console.log(`📍 Port: ${PORT}`);
