@@ -1121,6 +1121,9 @@ const validateLogin = [
 // 🚀 API ROUTES - WALLET & IDENTITY
 // =============================================
 
+// ✅ Auth Routes
+app.use('/api', require('./routes/authRoutes'));
+
 // 💰 Get Wallet Information
 app.get('/api/wallet', authenticateToken, async (req, res) => {
   try {
