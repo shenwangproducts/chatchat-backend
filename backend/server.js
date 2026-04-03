@@ -2055,6 +2055,7 @@ app.get('/api/profile', authenticateToken, async (req, res) => {
         id: req.user._id,
         username: req.user.username,
         email: req.user.email,
+        emailVerified: req.user.emailVerified,
         phone: req.user.phone,
         settings: req.user.settings,
         profilePicture: req.user.profilePicture,
