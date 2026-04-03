@@ -4,7 +4,6 @@ const cors = require('cors');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { body, validationResult } = require('express-validator');
-const rateLimit = require('express-rate-limit');
 const helmet = require('helmet');
 const multer = require('multer');
 const path = require('path');
@@ -20,6 +19,11 @@ const sgMail = require('@sendgrid/mail');
 const app = express();
 const PORT = process.env.PORT || 30001;
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-in-production';
+
+// ✅ Import Configurations & Middlewares
+const connectDB = require('./config/db');
+const { limiter } = require('./middlewares/rateLimiter');
+const errorHandler = require('./middlewares/errorHandler');
 
 // ✅ Trust Proxy (Required for Render/Heroku behind load balancer)
 app.set('trust proxy', 1);
@@ -61,16 +65,6 @@ app.use(helmet({
 }));
 
 // ✅ Rate Limiting
-const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  limit: 100, // limit each IP to 100 requests per windowMs
-  handler: (req, res, next, options) => {
-    res.status(options.statusCode).json({
-      success: false,
-      error: 'Too many requests from this IP, please try again later.'
-    });
-  }
-});
 app.use('/api/', limiter);
 
 // Middleware
@@ -181,26 +175,6 @@ const mediaUpload = multer({
   storage: mediaStorage,
   limits: { fileSize: 500 * 1024 * 1024 }, // 500MB limit for media
   fileFilter: mediaFilter
-});
-
-// ✅ MongoDB Connection
-const mongoURI = process.env.MONGODB_URI;
-if (!mongoURI) {
-  console.error('❌ MONGODB_URI is not defined in environment variables');
-  process.exit(1);
-}
-
-mongoose.connect(mongoURI, {
-  useNewUrlParser: true,
-  useUnifiedTopology: true
-});
-
-const db = mongoose.connection;
-db.on('error', console.error.bind(console, 'MongoDB connection error:'));
-db.once('open', () => {
-  console.log('✅ Connected to MongoDB successfully');
-  createSystemAccount();
-  createAdminUser();
 });
 
 // =============================================
@@ -7719,13 +7693,7 @@ app.get('/api/analytics/chat/:chatId', authenticateToken, async (req, res) => {
 });
 
 // 🚨 Error Handling Middleware
-app.use((error, req, res, next) => {
-  console.error('❌ Unhandled error:', error);
-  res.status(500).json({
-    success: false,
-    error: 'Internal server error'
-  });
-});
+app.use(errorHandler);
 
 // 404 Handler
 app.use('*', (req, res) => {
@@ -7740,6 +7708,9 @@ app.use('*', (req, res) => {
 // =============================================
 
 const startServer = async () => {
+  await connectDB();
+  createSystemAccount();
+  createAdminUser();
   await initializeMourningSettings();
   await initializeBankServices();
 
