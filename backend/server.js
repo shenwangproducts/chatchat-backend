@@ -12,6 +12,7 @@ require('dotenv').config();
 const { v2: cloudinary } = require('cloudinary');
 const cloudinaryStorage = require('multer-storage-cloudinary');
 const crypto = require('crypto');
+const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 
 const admin = require('firebase-admin');
 const sgMail = require('@sendgrid/mail');
@@ -72,6 +73,66 @@ app.use(cors({
   origin: true, // Reflect request origin to allow credentials safely
   credentials: true
 }));
+{
+  "packageId": "pkg_500"
+}
+
+// =============================================
+// 💳 STRIPE WEBHOOK (Must be before express.json)
+// =============================================
+app.post('/api/payment/webhook', express.raw({ type: 'application/json' }), (req, res) => {
+  const sig = req.headers['stripe-signature'];
+  let event;
+
+  try {
+    // 🔒 เช็คความถูกต้องของลายเซ็นดิจิทัล (Verify Signature) ว่ามาจาก Stripe จริง
+    event = stripe.webhooks.constructEvent(req.body, sig, process.env.STRIPE_WEBHOOK_SECRET);
+  } catch (err) {
+    console.error(`❌ Webhook signature verification failed:`, err.message);
+    return res.status(400).send(`Webhook Error: ${err.message}`);
+  }
+
+  // ⚡ ตอบกลับ 200 OK ทันที เพื่อจบการเชื่อมต่อกับ Stripe ลดคอขวดและคืนทรัพยากรเซิร์ฟเวอร์
+  res.json({ received: true });
+
+  // โยนงานการบวกเหรียญไปทำงานในระบบพื้นหลัง (Background Job)
+  if (event.type === 'payment_intent.succeeded') {
+    const paymentIntent = event.data.object;
+    
+    // รันแบบ Asynchronous ไม่ต้องรอ await
+    processPaymentSuccess(paymentIntent).catch(err => {
+      console.error('❌ Error processing successful payment:', err);
+    });
+  }
+});
+
+// 🔄 ฟังก์ชัน Background Job สำหรับเพิ่มคอยน์
+const processPaymentSuccess = async (paymentIntent) => {
+  const { userId, coinAmount } = paymentIntent.metadata;
+  const amountPaidThb = paymentIntent.amount / 100;
+
+  // ใช้ mongoose.model ดึงเพื่อป้องกัน ReferenceError กรณี Schema ยังโหลดไม่เสร็จ
+  const WalletModel = mongoose.model('Wallet');
+  const TransactionModel = mongoose.model('Transaction');
+
+  const wallet = await WalletModel.findOne({ userId });
+  if (wallet) {
+    wallet.coinPoints += parseInt(coinAmount, 10);
+    await wallet.save();
+
+    await TransactionModel.create({
+      userId,
+      walletId: wallet._id,
+      type: 'topup',
+      amount: amountPaidThb,
+      description: `Stripe Top-up: ${coinAmount} Coins`,
+      status: 'completed',
+      referenceId: paymentIntent.id
+    });
+    console.log(`✅ [Background] Successfully added ${coinAmount} coins to user ${userId}`);
+  }
+};
+
 app.use(express.json({ limit: '10mb' }));
 // Serve uploaded files
 app.use('/uploads', express.static('uploads'));
@@ -1345,6 +1406,53 @@ app.post('/api/wallet/add-coins', authenticateToken, [
   }
 });
 
+// 💳 Create Stripe Payment Intent (Backend กำหนดราคา 100%)
+app.post('/api/payment/create-intent', authenticateToken, async (req, res) => {
+  try {
+    const { packageId } = req.body;
+
+    // 🔒 จำกัดรายการสินค้าไว้ที่ Backend ป้องกันการยิง request แก้ไขราคาก่อนถึง Stripe
+    const coinPackages = {
+      'pkg_100': { priceThb: 35, coins: 100 },
+      'pkg_500': { priceThb: 150, coins: 500 },
+      'pkg_1000': { priceThb: 290, coins: 1000 },
+    };
+
+    const selectedPackage = coinPackages[packageId];
+    if (!selectedPackage) {
+      return res.status(400).json({ success: false, error: 'Invalid package ID' });
+    }
+
+    console.log(`💳 Creating payment intent for user ${req.user._id}, Package: ${packageId}`);
+
+    // สร้าง Payment Intent ไปยัง Stripe
+    const paymentIntent = await stripe.paymentIntents.create({
+      amount: selectedPackage.priceThb * 100, // Stripe บังคับให้ระบุเป็นจำนวนที่ย่อยที่สุด (เช่น 1 บาท = 100 สตางค์)
+      currency: 'thb',
+      // เปิดรองรับทั้งการตัดบัตรและพร้อมเพย์
+      payment_method_types: ['card', 'promptpay'], 
+      metadata: {
+        userId: req.user._id.toString(), // ฝังข้อมูลไอดีผู้ใช้ เพื่อให้ Webhook รู้ว่าต้องเติมเงินให้ใคร
+        coinAmount: selectedPackage.coins
+      }
+    });
+
+    res.json({
+      success: true,
+      clientSecret: paymentIntent.client_secret,
+      amountThb: selectedPackage.priceThb,
+      coins: selectedPackage.coins
+    });
+
+  } catch (error) {
+    console.error('❌ Create Payment Intent Error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to create payment intent: ' + error.message
+    });
+  }
+});
+
 // 🆔 Start Identity Verification - FIXED VERSION
 app.post('/api/identity/verify', authenticateToken, [
   body('verificationMethod')
@@ -2051,7 +2159,7 @@ app.get('/api/profile', authenticateToken, async (req, res) => {
 
     res.json({
       success: true,
-      user: {
+      user: { 
         id: req.user._id,
         username: req.user.username,
         email: req.user.email,
