@@ -43,6 +43,21 @@ const mediaUploadSchema = new mongoose.Schema({
   collaborators: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
   // ------------------------------------
 
+  // ✅ ส่วนที่เพิ่มใหม่สำหรับ Video Content AI Scanner
+  aiScanStatus: {
+    type: String,
+    enum: ['pending', 'scanning', 'clean', 'flagged'],
+    default: 'pending',
+    index: true
+  },
+  isSuspended: { type: Boolean, default: false },
+  suspensionReason: { type: String },
+
+  // ✅ ส่วนที่เพิ่มใหม่สำหรับ Fake Engagement Tracking
+  hasSuspiciousEngagement: { type: Boolean, default: false, index: true },
+  suspiciousLikesCount: { type: Number, default: 0 },
+  suspiciousViewsCount: { type: Number, default: 0 },
+
   uploadedAt: { type: Date, default: Date.now },
   completedAt: { type: Date, sparse: true },
   cancelledAt: { type: Date, sparse: true },
