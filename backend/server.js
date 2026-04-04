@@ -73,9 +73,6 @@ app.use(cors({
   origin: true, // Reflect request origin to allow credentials safely
   credentials: true
 }));
-{
-  "packageId": "pkg_500"
-}
 
 // =============================================
 // 💳 STRIPE WEBHOOK (Must be before express.json)
