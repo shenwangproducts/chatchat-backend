@@ -1437,6 +1437,103 @@ app.post('/api/wallet/add-coins', authenticateToken, [
   }
 });
 
+// 📦 Purchase Package
+app.post('/api/packages/purchase', authenticateToken, async (req, res) => {
+  try {
+    const { packageName, price } = req.body;
+    const userId = req.user._id;
+
+    // 1. ดึงข้อมูล User และ Wallet ปัจจุบัน
+    const user = await User.findById(userId);
+    const wallet = await Wallet.findOne({ userId });
+
+    // 2. ป้องกันบัค "ซื้อซ้ำ": เช็คว่าแพ็กเกจเดิมยังไม่หมดอายุใช่ไหม?
+    if (user.activePackage && user.activePackage.expiresAt > new Date()) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'คุณมีแพ็กเกจที่ใช้งานอยู่แล้ว ไม่สามารถซื้อเพิ่มได้จนกว่าจะหมดอายุ' 
+      });
+    }
+
+    // 3. เช็คยอด Coin ว่าพอไหม
+    if (!wallet || wallet.coinPoints < price) {
+      return res.status(400).json({ success: false, error: 'ยอด Coin ไม่เพียงพอ' });
+    }
+
+    // 4. หัก Coin และคำนวณวันหมดอายุ (สมมติแยกตามชื่อแพ็กเกจ)
+    wallet.coinPoints -= price;
+    await wallet.save();
+
+    let durationMonths = 1;
+    if (packageName.toLowerCase().includes('silver')) durationMonths = 3;
+    else if (packageName.toLowerCase().includes('gold')) durationMonths = 6;
+    else if (packageName.toLowerCase().includes('platinum')) durationMonths = 12;
+
+    const expiresAt = new Date();
+    expiresAt.setMonth(expiresAt.getMonth() + durationMonths);
+
+    // 5. อัปเดตโปรไฟล์ User (ให้กรอบและป้ายสัญลักษณ์เปลี่ยนไปตามแพ็กเกจ)
+    user.activePackage = {
+      name: packageName,
+      purchasedAt: new Date(),
+      expiresAt: expiresAt
+    };
+    user.frameType = packageName.split(' ')[0].toLowerCase(); // เช่น 'silver', 'gold' 
+    await user.save();
+
+    // 6. ส่ง Email ใบเสร็จยืนยันตัวตนด้วย SendGrid
+    if (process.env.SENDGRID_API_KEY) {
+      const emailHtml = `
+        <div style="font-family: Arial, sans-serif; padding: 20px; color: #333;">
+          <h2 style="color: #4CAF50;">✅ ยืนยันการสั่งซื้อแพ็กเกจสำเร็จ</h2>
+          <p>ขอบคุณที่สมัครแพ็กเกจกับ ChatChat รายละเอียดการชำระเงินของคุณมีดังนี้:</p>
+          <table style="width: 100%; border-collapse: collapse; margin-top: 15px;">
+            <tr><td style="padding: 8px 0; border-bottom: 1px solid #eee;"><b>ไอดีผู้ซื้อ (User ID):</b></td><td style="text-align: right;">${user.userId || user._id}</td></tr>
+            <tr><td style="padding: 8px 0; border-bottom: 1px solid #eee;"><b>ชื่อแพ็กเกจ:</b></td><td style="text-align: right; color: #2196F3;"><b>${packageName}</b></td></tr>
+            <tr><td style="padding: 8px 0; border-bottom: 1px solid #eee;"><b>ยอดชำระ:</b></td><td style="text-align: right;">${price} Coin</td></tr>
+            <tr><td style="padding: 8px 0; border-bottom: 1px solid #eee;"><b>ช่องทางชำระ:</b></td><td style="text-align: right;">ChatChat Wallet Coin</td></tr>
+            <tr><td style="padding: 8px 0; border-bottom: 1px solid #eee;"><b>วันที่สั่งซื้อ:</b></td><td style="text-align: right;">${new Date().toLocaleString('th-TH')}</td></tr>
+            <tr><td style="padding: 8px 0; border-bottom: 1px solid #eee;"><b>วันสิ้นสุดแพ็กเกจ:</b></td><td style="text-align: right; color: #F44336;"><b>${expiresAt.toLocaleString('th-TH')}</b></td></tr>
+          </table>
+          <p style="margin-top: 20px; font-size: 12px; color: #777;">กรอบโปรไฟล์และสัญลักษณ์ของคุณถูกอัปเดตในระบบเรียบร้อยแล้ว</p>
+        </div>
+      `;
+
+      const msg = {
+        to: user.email,
+        from: process.env.SENDGRID_FROM_EMAIL || 'noreply@chatchat.app', // ⚠️ ต้องเป็นอีเมลที่คุณ Verify ไว้ใน SendGrid
+        subject: `ใบเสร็จรับเงิน: การสั่งซื้อแพ็กเกจ ${packageName}`,
+        html: emailHtml,
+      };
+
+      sgMail.send(msg).then(() => console.log('📧 SendGrid Email sent')).catch(err => console.error('SendGrid Error:', err));
+    }
+
+    // 7. บันทึกประวัติการใช้จ่าย
+    const TransactionModel = mongoose.model('Transaction');
+    await TransactionModel.create({
+      userId: req.user._id,
+      walletId: wallet._id,
+      type: 'payment',
+      amount: price,
+      currency: 'COIN',
+      description: `ซื้อแพ็กเกจ ${packageName}`,
+      status: 'completed',
+      referenceId: `PKG_${Date.now()}`
+    });
+
+    res.status(200).json({ 
+      success: true, 
+      message: 'ชำระเงินและสมัครแพ็กเกจสำเร็จ',
+      newBalance: wallet.coinPoints 
+    });
+
+  } catch (error) {
+    console.error('Purchase Package Error:', error);
+    res.status(500).json({ success: false, error: 'เกิดข้อผิดพลาดจากเซิร์ฟเวอร์' });
+  }
+});
+
 // 💳 Create Stripe Payment Intent (Backend กำหนดราคา 100%)
 app.post('/api/payment/create-intent', authenticateToken, async (req, res) => {
   try {
@@ -2295,7 +2392,9 @@ app.get('/api/profile', authenticateToken, async (req, res) => {
         workCountry: req.user.workCountry,
         education: req.user.education,
         interests: req.user.interests,
-        socials: req.user.socials
+        socials: req.user.socials,
+        activePackage: req.user.activePackage,
+        frameType: req.user.frameType
       },
       wallet: wallet ? {
         balance: wallet.balance,
@@ -2431,7 +2530,9 @@ app.put('/api/profile', authenticateToken, [
         email: req.user.email,
         phone: req.user.phone,
         profilePicture: req.user.profilePicture,
-        settings: req.user.settings
+        settings: req.user.settings,
+        activePackage: req.user.activePackage,
+        frameType: req.user.frameType
       }
     });
 
