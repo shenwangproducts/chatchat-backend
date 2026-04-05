@@ -1502,6 +1502,10 @@ app.post('/api/packages/purchase', authenticateToken, async (req, res) => {
       const msg = {
         to: user.email,
         from: process.env.SENDGRID_FROM_EMAIL || 'noreply@chatchat.app', // ⚠️ ต้องเป็นอีเมลที่คุณ Verify ไว้ใน SendGrid
+        from: {
+          email: process.env.SENDGRID_FROM_EMAIL || 'noreply@chatchat.app', // ⚠️ ต้องเป็นอีเมลที่คุณ Verify ไว้ใน SendGrid
+          name: process.env.SENDGRID_FROM_NAME || 'ChatChat App'
+        },
         subject: `ใบเสร็จรับเงิน: การสั่งซื้อแพ็กเกจ ${packageName}`,
         html: emailHtml,
       };
@@ -2592,6 +2596,10 @@ app.post('/api/user/send-verification-email', authenticateToken, async (req, res
     const msg = {
       to: user.email,
       from: process.env.SENDGRID_FROM_EMAIL || 'noreply@chatchat.app',
+      from: {
+        email: process.env.SENDGRID_FROM_EMAIL || 'noreply@chatchat.app',
+        name: process.env.SENDGRID_FROM_NAME || 'ChatChat App'
+      },
       subject: '📧 Verify Your Email Address - Chat Chat',
       html: `
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
