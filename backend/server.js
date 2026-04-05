@@ -1487,13 +1487,13 @@ app.post('/api/payment/create-intent', authenticateToken, async (req, res) => {
 // 💳 Create Stripe Session (PromptPay) สำหรับแอปพลิเคชัน
 app.post('/api/wallet/stripe/create-session', authenticateToken, async (req, res) => {
   try {
-    const { amount, coinAmount, method } = req.body;
+    const { amount, coinAmount, method, email } = req.body;
 
     if (!amount || !coinAmount) {
       return res.status(400).json({ success: false, error: 'Amount and coinAmount are required' });
     }
 
-    console.log(`💳 Creating Stripe ${method} session for user ${req.user._id}, Amount: ${amount}, Coins: ${coinAmount}`);
+    console.log(`💳 Creating Stripe PromptPay session for user ${req.user._id}, Amount: ${amount}, Coins: ${coinAmount}`);
 
     // สร้างและ Confirm Payment Intent ทันทีเพื่อให้ Stripe ออก QR Code ให้
     const paymentIntent = await stripe.paymentIntents.create({
@@ -1502,30 +1502,65 @@ app.post('/api/wallet/stripe/create-session', authenticateToken, async (req, res
       payment_method_types: ['promptpay'],
       payment_method_data: {
         type: 'promptpay',
+        billing_details: {
+          email: email || req.user.email || 'user@example.com' // 👈 สำคัญมาก
+        }
       },
       confirm: true, // บังคับ Confirm เพื่อให้สร้าง URL จ่ายเงินทันที
       return_url: 'https://chatchat-backend.onrender.com', // จำเป็นต้องใส่เมื่อบังคับ confirm แบบ Redirect
       metadata: {
         userId: req.user._id.toString(),
-        coinAmount: coinAmount.toString()
+        coinAmount: coinAmount.toString(),
+        type: 'promptpay'
       }
     });
 
     // ดึงลิงก์ Voucher ที่มีรูป QR Code ของ PromptPay ออกมา
-    const qrCodeUrl = paymentIntent.next_action?.promptpay_display_details?.hosted_voucher_url;
+    const qrCodeUrl = paymentIntent.next_action?.promptpay_display_url || paymentIntent.next_action?.promptpay_display_details?.hosted_voucher_url || '';
 
-    res.json({
+    res.status(200).json({
       success: true,
       sessionId: paymentIntent.id,
-      qrCodeUrl: qrCodeUrl || paymentIntent.client_secret // ส่ง fallback ไปเผื่อแอปใช้ SDK จัดการเอง
+      qrCodeUrl: qrCodeUrl
     });
 
   } catch (error) {
-    console.error('❌ Create Stripe Session Error:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Failed to create payment session: ' + error.message
+    console.error('❌ Stripe PromptPay Error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// 💳 POST /api/wallet/stripe/create-intent (สำหรับบัตรเครดิต)
+app.post('/api/wallet/stripe/create-intent', authenticateToken, async (req, res) => {
+  try {
+    const { amount, coinAmount, email } = req.body;
+
+    if (!amount || !coinAmount) {
+      return res.status(400).json({ success: false, error: 'Amount and coinAmount are required' });
+    }
+
+    console.log(`💳 Creating Stripe Credit Card intent for user ${req.user._id}, Amount: ${amount}`);
+
+    const paymentIntent = await stripe.paymentIntents.create({
+      amount: parseInt(amount) * 100, // สตางค์
+      currency: 'thb',
+      payment_method_types: ['card'],
+      receipt_email: email || req.user.email,
+      metadata: { 
+        userId: req.user._id.toString(), 
+        coinAmount: coinAmount.toString(), 
+        type: 'credit_card' 
+      }
     });
+
+    // สำหรับบัตรเครดิต เราต้องการแค่ส่ง Client Secret ไปให้แอปเอาไปเข้า Payment Sheet
+    res.status(200).json({
+      success: true,
+      clientSecret: paymentIntent.client_secret,
+    });
+  } catch (error) {
+    console.error('❌ Stripe Credit Card Error:', error);
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
