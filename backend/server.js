@@ -16,8 +16,30 @@ const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 
 const admin = require('firebase-admin');
 const sgMail = require('@sendgrid/mail');
+const http = require('http');
+const { Server } = require('socket.io');
 
 const app = express();
+const server = http.createServer(app);
+
+// ⚡ ตั้งค่า Socket.io สำหรับ WebSockets
+const io = new Server(server, {
+  cors: { origin: true, credentials: true }
+});
+app.set('io', io); // เก็บ instance io ไว้ใน app เผื่อใช้ที่อื่น
+
+io.on('connection', (socket) => {
+  // ให้แอปมือถือส่งไอดีผู้ใช้มาตอนต่อ Socket เพื่อเข้าห้องส่วนตัว (Room)
+  socket.on('join_wallet', (userId) => {
+    socket.join(`wallet_${userId}`);
+    console.log(`👤 [WebSocket] User ${userId} joined room: wallet_${userId}`);
+  });
+  
+  socket.on('disconnect', () => {
+    // console.log('🔌 WebSocket Disconnected');
+  });
+});
+
 const PORT = process.env.PORT || 30001;
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-in-production';
 
@@ -127,6 +149,18 @@ const processPaymentSuccess = async (paymentIntent) => {
       referenceId: paymentIntent.id
     });
     console.log(`✅ [Background] Successfully added ${coinAmount} coins to user ${userId}`);
+
+    // ⚡ ส่งสัญญาณผ่าน WebSocket แจ้งแอปมือถือว่าได้เหรียญเรียบร้อยแล้ว
+    const io = app.get('io');
+    if (io) {
+      io.to(`wallet_${userId}`).emit('payment_success', {
+        success: true,
+        coinAmount: parseInt(coinAmount, 10),
+        newBalance: wallet.coinPoints,
+        referenceId: paymentIntent.id
+      });
+      console.log(`⚡ [WebSocket] Notified user ${userId} of payment success`);
+    }
   }
 };
 
@@ -1446,6 +1480,51 @@ app.post('/api/payment/create-intent', authenticateToken, async (req, res) => {
     res.status(500).json({
       success: false,
       error: 'Failed to create payment intent: ' + error.message
+    });
+  }
+});
+
+// 💳 Create Stripe Session (PromptPay) สำหรับแอปพลิเคชัน
+app.post('/api/wallet/stripe/create-session', authenticateToken, async (req, res) => {
+  try {
+    const { amount, coinAmount, method } = req.body;
+
+    if (!amount || !coinAmount) {
+      return res.status(400).json({ success: false, error: 'Amount and coinAmount are required' });
+    }
+
+    console.log(`💳 Creating Stripe ${method} session for user ${req.user._id}, Amount: ${amount}, Coins: ${coinAmount}`);
+
+    // สร้างและ Confirm Payment Intent ทันทีเพื่อให้ Stripe ออก QR Code ให้
+    const paymentIntent = await stripe.paymentIntents.create({
+      amount: parseInt(amount) * 100, // แปลงบาทเป็นสตางค์ (Stripe ใช้หน่วยย่อยที่สุด)
+      currency: 'thb',
+      payment_method_types: ['promptpay'],
+      payment_method_data: {
+        type: 'promptpay',
+      },
+      confirm: true, // บังคับ Confirm เพื่อให้สร้าง URL จ่ายเงินทันที
+      return_url: 'https://chatchat-backend.onrender.com', // จำเป็นต้องใส่เมื่อบังคับ confirm แบบ Redirect
+      metadata: {
+        userId: req.user._id.toString(),
+        coinAmount: coinAmount.toString()
+      }
+    });
+
+    // ดึงลิงก์ Voucher ที่มีรูป QR Code ของ PromptPay ออกมา
+    const qrCodeUrl = paymentIntent.next_action?.promptpay_display_details?.hosted_voucher_url;
+
+    res.json({
+      success: true,
+      sessionId: paymentIntent.id,
+      qrCodeUrl: qrCodeUrl || paymentIntent.client_secret // ส่ง fallback ไปเผื่อแอปใช้ SDK จัดการเอง
+    });
+
+  } catch (error) {
+    console.error('❌ Create Stripe Session Error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to create payment session: ' + error.message
     });
   }
 });
@@ -7203,7 +7282,7 @@ const startServer = async () => {
   await initializeMourningSettings();
   await initializeBankServices();
 
-  app.listen(PORT, '0.0.0.0', () => {
+  server.listen(PORT, '0.0.0.0', () => {
     console.log('🚀 =================================');
     console.log('📡 Connect API Server Started!');
     console.log(`📍 Port: ${PORT}`);
