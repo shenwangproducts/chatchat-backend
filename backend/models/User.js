@@ -60,6 +60,13 @@ const userSchema = new mongoose.Schema({
   pdpaConsent: { type: Boolean, default: false },
   consentTimestamp: Date,
   fcmToken: { type: String }, // สำหรับ Push Notifications
+  activePackage: {
+    name: String,
+    purchasedAt: Date,
+    expiresAt: Date
+  },
+  frameType: { type: String, default: 'none' },
+  badgeUrl: { type: String, default: '' },
   notificationSettings: {
     chatNotifications: { type: Boolean, default: true },
     friendRequestNotifications: { type: Boolean, default: true },

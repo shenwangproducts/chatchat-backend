@@ -2398,7 +2398,8 @@ app.get('/api/profile', authenticateToken, async (req, res) => {
         interests: req.user.interests,
         socials: req.user.socials,
         activePackage: req.user.activePackage,
-        frameType: req.user.frameType
+        frameType: req.user.frameType,
+        badgeUrl: req.user.badgeUrl
       },
       wallet: wallet ? {
         balance: wallet.balance,
@@ -2536,7 +2537,8 @@ app.put('/api/profile', authenticateToken, [
         profilePicture: req.user.profilePicture,
         settings: req.user.settings,
         activePackage: req.user.activePackage,
-        frameType: req.user.frameType
+        frameType: req.user.frameType,
+        badgeUrl: req.user.badgeUrl
       }
     });
 
@@ -5576,6 +5578,51 @@ app.post('/api/profile/picture', authenticateToken, async (req, res) => {
     res.status(500).json({
       success: false,
       error: 'Failed to upload profile picture'
+    });
+  }
+});
+
+// 🏷️ Upload Profile Badge
+app.post('/api/profile/badge', authenticateToken, async (req, res) => {
+  try {
+    const { imageData } = req.body;
+
+    console.log('🏷️ Profile badge upload for user:', req.user._id);
+
+    if (!imageData) {
+      return res.status(400).json({
+        success: false,
+        error: 'Image data is required'
+      });
+    }
+
+    let badgeUrl = imageData;
+
+    // ถ้าส่งมาเป็น base64 ให้ทำการอัปโหลดขึ้น Cloudinary ก่อน
+    if (imageData.startsWith('data:image/')) {
+      const uploadRes = await cloudinary.uploader.upload(imageData, {
+        folder: 'chatchat_badges'
+      });
+      badgeUrl = uploadRes.secure_url;
+    }
+
+    req.user.badgeUrl = badgeUrl;
+    req.user.updatedAt = new Date();
+    await req.user.save();
+
+    console.log('✅ Profile badge uploaded successfully');
+
+    res.status(200).json({
+      success: true,
+      message: 'Profile badge uploaded successfully',
+      badgeUrl: badgeUrl
+    });
+
+  } catch (error) {
+    console.error('❌ Upload profile badge error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to upload profile badge'
     });
   }
 });
