@@ -5987,6 +5987,135 @@ app.put('/api/groups/:id/members/roles', authenticateToken, async (req, res) => 
   }
 });
 
+// 🟢 1. ดึงการตั้งค่ากลุ่ม
+app.get('/api/groups/:groupId/settings', authenticateToken, async (req, res) => {
+  try {
+    const group = await Chat.findOne({ _id: req.params.groupId, chatType: 'group' });
+    if (!group) return res.status(404).json({ success: false, error: 'Group not found' });
+
+    const isMember = group.participants.some(p => p.toString() === req.user._id.toString());
+    if (!isMember) return res.status(403).json({ success: false, error: 'Not a member of this group' });
+
+    const isAdmin = group.admins.some(a => a.toString() === req.user._id.toString());
+    const isCreator = group.createdBy && group.createdBy.toString() === req.user._id.toString();
+    const myRole = isCreator ? 'creator' : (isAdmin ? 'admin' : 'member');
+
+    const defaultSettings = { 
+      allowVoiceCalls: true, 
+      allowVideoCalls: true, 
+      allowMemberPin: false, 
+      allowSendFiles: true, 
+      allowSendVideos: true, 
+      chatCooldown: 0, 
+      groupPassword: '', 
+      announcementOnly: false 
+    };
+
+    res.json({ success: true, settings: group.settings || defaultSettings, myRole });
+  } catch (error) { 
+    res.status(500).json({ success: false, error: error.message }); 
+  }
+});
+
+// 🟢 2. อัปเดตการตั้งค่ากลุ่ม (เฉพาะ Admin/Creator)
+app.put('/api/groups/:groupId/settings', authenticateToken, async (req, res) => {
+  try {
+    const group = await Chat.findOne({ _id: req.params.groupId, chatType: 'group' });
+    if (!group) return res.status(404).json({ success: false, error: 'Group not found' });
+
+    const isAdmin = group.admins.some(a => a.toString() === req.user._id.toString());
+    const isCreator = group.createdBy && group.createdBy.toString() === req.user._id.toString();
+
+    if (!isAdmin && !isCreator) {
+      return res.status(403).json({ success: false, error: 'Only admins or creator can update group settings' });
+    }
+
+    group.settings = { ...group.settings, ...req.body };
+    await group.save();
+
+    res.json({ success: true, message: 'Settings updated successfully', settings: group.settings });
+  } catch (error) { 
+    res.status(500).json({ success: false, error: error.message }); 
+  }
+});
+
+// 🟢 3. เตะสมาชิกออก (Kick Member)
+app.delete('/api/groups/:groupId/members/:userId', authenticateToken, async (req, res) => {
+  try {
+    const group = await Chat.findOne({ _id: req.params.groupId, chatType: 'group' });
+    if (!group) return res.status(404).json({ success: false, error: 'Group not found' });
+
+    const isAdmin = group.admins.some(a => a.toString() === req.user._id.toString());
+    const isCreator = group.createdBy && group.createdBy.toString() === req.user._id.toString();
+
+    if (!isAdmin && !isCreator) {
+      return res.status(403).json({ success: false, error: 'Only admins or creator can kick members' });
+    }
+
+    if (req.params.userId === req.user._id.toString() || (group.createdBy && req.params.userId === group.createdBy.toString())) {
+       return res.status(400).json({ success: false, error: 'Cannot kick this user' });
+    }
+
+    group.participants = group.participants.filter(p => p.toString() !== req.params.userId);
+    group.admins = group.admins.filter(a => a.toString() !== req.params.userId);
+    
+    await group.save();
+
+    // 📝 ส่ง System Message ลงกลุ่มแจ้งว่าถูกเตะออก
+    const kickedUser = await User.findById(req.params.userId);
+    if (kickedUser) {
+      await Message.create({
+        chatId: group._id,
+        senderId: req.user._id,
+        messageType: 'system',
+        content: `${kickedUser.username} ถูกเตะออกจากกลุ่มโดยแอดมิน`
+      });
+    }
+
+    res.json({ success: true, message: 'Member kicked successfully' });
+  } catch (error) { 
+    res.status(500).json({ success: false, error: error.message }); 
+  }
+});
+
+// 🟢 4. อัปเดตชื่อและรูปภาพกลุ่ม (Multipart Form-Data)
+app.put('/api/groups/:groupId/info', authenticateToken, mediaUpload.single('groupPicture'), async (req, res) => {
+  try {
+    const group = await Chat.findOne({ _id: req.params.groupId, chatType: 'group' });
+    if (!group) return res.status(404).json({ success: false, error: 'Group not found' });
+
+    const isAdmin = group.admins.some(a => a.toString() === req.user._id.toString());
+    const isCreator = group.createdBy && group.createdBy.toString() === req.user._id.toString();
+
+    if (!isAdmin && !isCreator) {
+      return res.status(403).json({ success: false, error: 'Only admins or creator can update group info' });
+    }
+
+    if (req.body.name) {
+      group.title = req.body.name; 
+    }
+
+    if (req.file && req.file.path) {
+      group.groupPicture = req.file.path; 
+    } else if (req.body.groupPicture) {
+      group.groupPicture = req.body.groupPicture;
+    }
+    
+    await group.save();
+    res.json({ 
+      success: true, 
+      message: 'Group info updated successfully', 
+      group: { 
+        id: group._id, 
+        name: group.title, 
+        groupPicture: group.groupPicture 
+      } 
+    });
+  } catch (error) { 
+    res.status(500).json({ success: false, error: error.message }); 
+  }
+});
+
 // =============================================
 // 🗂️ FILE UPLOAD ROUTES
 // =============================================

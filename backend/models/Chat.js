@@ -14,6 +14,16 @@ const chatSchema = new mongoose.Schema({
   title: { type: String, required: true },
   description: { type: String },
   groupPicture: { type: String },
+  settings: {
+    allowVoiceCalls: { type: Boolean, default: true },
+    allowVideoCalls: { type: Boolean, default: true },
+    allowMemberPin: { type: Boolean, default: false },
+    allowSendFiles: { type: Boolean, default: true },
+    allowSendVideos: { type: Boolean, default: true },
+    chatCooldown: { type: Number, default: 0 },
+    groupPassword: { type: String, default: '' },
+    announcementOnly: { type: Boolean, default: false }
+  },
   admins: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
   lastMessage: { type: String, default: '' },
   lastMessageTime: { type: Date, default: Date.now },
