@@ -198,6 +198,21 @@ const upload = multer({
   fileFilter: fileFilter
 });
 
+// ✅ Configure Multer for Group Pictures
+const groupStorage = multer.diskStorage({
+  destination: function (req, file, cb) {
+    const uploadDir = 'uploads/groups/';
+    // สร้างโฟลเดอร์ให้ถอนยังไม่มี
+    if (!fs.existsSync('uploads')) fs.mkdirSync('uploads');
+    if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir);
+    cb(null, uploadDir);
+  },
+  filename: function (req, file, cb) {
+    cb(null, 'group-' + Date.now() + path.extname(file.originalname));
+  }
+});
+const uploadGroup = multer({ storage: groupStorage });
+
 // ✅ Configure Multer for media uploads (videos, photos) - Higher file size limit
 const mediaStorage = cloudinaryStorage({
   cloudinary: cloudinary,
