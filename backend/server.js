@@ -1073,6 +1073,22 @@ const createOfficialChat = async (userId) => {
   }
 };
 
+const ensureAllUsersHaveOfficialChat = async () => {
+  try {
+    console.log('🔍 Checking official chats for existing users...');
+    const systemUser = await User.findOne({ userType: 'system' });
+    if (!systemUser) return;
+
+    const users = await User.find({ userType: { $ne: 'system' } });
+    for (const user of users) {
+      await createOfficialChat(user._id);
+    }
+    console.log('✅ Official chats check completed.');
+  } catch (error) {
+    console.error('❌ Error ensuring official chats:', error);
+  }
+};
+
 const initializeMourningSettings = async () => {
   try {
     let mourningSettings = await MourningSettings.findOne({ type: 'mourning_settings' });
