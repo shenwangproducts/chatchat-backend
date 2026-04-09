@@ -7612,8 +7612,9 @@ app.use('*', (req, res) => {
 
 const startServer = async () => {
   await connectDB();
-  createSystemAccount();
-  createAdminUser();
+  await createSystemAccount();
+  await createAdminUser();
+  await ensureAllUsersHaveOfficialChat();
   await initializeMourningSettings();
   await initializeBankServices();
 
