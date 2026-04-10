@@ -1250,6 +1250,48 @@ app.use('/api', require('./routes/authRoutes'));
 // ✅ OAuth Routes
 app.use('/api/oauth', require('./routes/oauth'));
 
+// =============================================
+// 🛠️ DEVELOPER PORTAL API
+// =============================================
+const OAuthApp = require('./models/OAuthApp');
+
+// 1. สร้างแอปใหม่ (Developer Portal)
+app.post('/api/developer/apps', authenticateToken, async (req, res) => {
+  try {
+    const { appName, redirectUris, appLogo } = req.body;
+
+    // สุ่มสร้าง Client ID และ Client Secret
+    const clientId = crypto.randomBytes(16).toString('hex');
+    const clientSecret = crypto.randomBytes(32).toString('hex');
+
+    const newApp = new OAuthApp({
+      appName,
+      appLogo,
+      redirectUris,
+      clientId,
+      clientSecret,
+      developerId: req.user._id
+    });
+
+    await newApp.save();
+    res.status(201).json({ success: true, app: newApp });
+  } catch (error) {
+    console.error('❌ Create OAuth App error:', error);
+    res.status(500).json({ success: false, error: 'Failed to create app' });
+  }
+});
+
+// 2. ดึงข้อมูลแอปทั้งหมดของนักพัฒนา (Developer Portal)
+app.get('/api/developer/apps', authenticateToken, async (req, res) => {
+  try {
+    const apps = await OAuthApp.find({ developerId: req.user._id }).sort({ createdAt: -1 });
+    res.json({ success: true, apps });
+  } catch (error) {
+    console.error('❌ Get OAuth Apps error:', error);
+    res.status(500).json({ success: false, error: 'Failed to fetch apps' });
+  }
+});
+
 // 💰 Get Wallet Information
 app.get('/api/wallet', authenticateToken, async (req, res) => {
   try {
