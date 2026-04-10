@@ -1292,6 +1292,76 @@ app.get('/api/developer/apps', authenticateToken, async (req, res) => {
   }
 });
 
+// 3. ดึงข้อมูลโปรไฟล์นักพัฒนา (Developer Portal)
+app.get('/api/developer/profile', authenticateToken, async (req, res) => {
+  try {
+    // ส่งข้อมูลโปรไฟล์และโควตากลับไป (ถ้าใน User schema อนาคตมีการเก็บ API Quota ค่อยเปลี่ยนมาดึงค่าจริง)
+    const profile = {
+      email: req.user.email,
+      tier: 'Free Tier',
+      apiRequests: req.user.apiRequests || 0,
+      apiQuota: req.user.apiQuota || 100000
+    };
+    res.json({ success: true, profile });
+  } catch (error) {
+    console.error('❌ Get Developer Profile error:', error);
+    res.status(500).json({ success: false, error: 'Failed to fetch profile' });
+  }
+});
+
+// 4. อัปเดตข้อมูลแอป (Developer Portal)
+app.put('/api/developer/apps/:id', authenticateToken, async (req, res) => {
+  try {
+    const { appName, redirectUris, appLogo, supportEmail, privacyUrl, tosUrl } = req.body;
+    const app = await OAuthApp.findOne({ _id: req.params.id, developerId: req.user._id });
+
+    if (!app) return res.status(404).json({ success: false, error: 'App not found' });
+
+    if (appName) app.appName = appName;
+    if (redirectUris) app.redirectUris = redirectUris;
+    if (appLogo) app.appLogo = appLogo;
+    if (supportEmail) app.supportEmail = supportEmail;
+    if (privacyUrl) app.privacyUrl = privacyUrl;
+    if (tosUrl) app.tosUrl = tosUrl;
+
+    await app.save();
+    res.json({ success: true, app });
+  } catch (error) {
+    console.error('❌ Update OAuth App error:', error);
+    res.status(500).json({ success: false, error: 'Failed to update app' });
+  }
+});
+
+// 5. รีเซ็ต Client Secret (Developer Portal)
+app.post('/api/developer/apps/:id/reset-secret', authenticateToken, async (req, res) => {
+  try {
+    const app = await OAuthApp.findOne({ _id: req.params.id, developerId: req.user._id });
+    if (!app) return res.status(404).json({ success: false, error: 'App not found' });
+
+    // สร้าง Secret ใหม่
+    app.clientSecret = crypto.randomBytes(32).toString('hex');
+    await app.save();
+
+    res.json({ success: true, message: 'Secret reset successfully', clientSecret: app.clientSecret });
+  } catch (error) {
+    console.error('❌ Reset Secret error:', error);
+    res.status(500).json({ success: false, error: 'Failed to reset secret' });
+  }
+});
+
+// 6. ลบแอป (Developer Portal)
+app.delete('/api/developer/apps/:id', authenticateToken, async (req, res) => {
+  try {
+    const app = await OAuthApp.findOneAndDelete({ _id: req.params.id, developerId: req.user._id });
+    if (!app) return res.status(404).json({ success: false, error: 'App not found' });
+
+    res.json({ success: true, message: 'App deleted successfully' });
+  } catch (error) {
+    console.error('❌ Delete OAuth App error:', error);
+    res.status(500).json({ success: false, error: 'Failed to delete app' });
+  }
+});
+
 // 💰 Get Wallet Information
 app.get('/api/wallet', authenticateToken, async (req, res) => {
   try {
