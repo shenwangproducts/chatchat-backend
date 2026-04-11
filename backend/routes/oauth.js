@@ -63,58 +63,21 @@ router.get('/authorize', async (req, res) => {
             <label>รหัสผ่าน</label>
             <input type="password" id="password" placeholder="••••••••">
           </div>
-          <button class="btn btn-allow" onclick="login()">เข้าสู่ระบบ</button>
+          <button class="btn btn-allow" id="btnLogin">เข้าสู่ระบบ</button>
           <div id="login-error" style="color: #f44336; margin-top: 10px; display: none; font-size: 14px;">อีเมลหรือรหัสผ่านไม่ถูกต้อง</div>
         </div>
 
         <div id="consent-section">
           <p>แอปพลิเคชัน <b>${app.appName}</b><br>ต้องการขอสิทธิ์เข้าถึงข้อมูลโปรไฟล์พื้นฐานของคุณ</p>
-          <button class="btn btn-allow" onclick="submitConsent(true)">อนุญาตให้เข้าถึง (Allow)</button>
-          <button class="btn btn-deny" onclick="submitConsent(false)">ปฏิเสธ (Deny)</button>
+          <button class="btn btn-allow" id="btnAllow">อนุญาตให้เข้าถึง (Allow)</button>
+          <button class="btn btn-deny" id="btnDeny">ปฏิเสธ (Deny)</button>
         </div>
       </div>
 
-      <script>
-        const token = localStorage.getItem('chatchat_oauth_token');
-        if (token) { document.getElementById('consent-section').style.display = 'block'; }
-        else { document.getElementById('login-section').style.display = 'block'; }
-
-        async function login() {
-          const email = document.getElementById('email').value;
-          const password = document.getElementById('password').value;
-          const errorDiv = document.getElementById('login-error');
-          errorDiv.style.display = 'none';
-          try {
-            const res = await fetch('/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password }) });
-            const data = await res.json();
-            if (data.success) {
-              localStorage.setItem('chatchat_oauth_token', data.authToken);
-              document.getElementById('login-section').style.display = 'none';
-              document.getElementById('consent-section').style.display = 'block';
-            } else { errorDiv.innerText = data.error || 'เข้าสู่ระบบไม่สำเร็จ'; errorDiv.style.display = 'block'; }
-          } catch (e) { errorDiv.innerText = 'ไม่สามารถเชื่อมต่อเซิร์ฟเวอร์ได้'; errorDiv.style.display = 'block'; }
-        }
-
-        async function submitConsent(approved) {
-          const token = localStorage.getItem('chatchat_oauth_token');
-          try {
-            const res = await fetch('/api/oauth/authorize', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
-              body: JSON.stringify({ client_id: '${client_id}', redirect_uri: '${redirect_uri}', state: '${state || ''}', scope: '${scope || ''}', approved })
-            });
-            if (res.status === 401) {
-              localStorage.removeItem('chatchat_oauth_token');
-              document.getElementById('consent-section').style.display = 'none';
-              document.getElementById('login-section').style.display = 'block';
-              return;
-            }
-            const data = await res.json();
-            if (data.success && data.redirect_url) { window.location.href = data.redirect_url; } 
-            else { alert(data.error || 'เกิดข้อผิดพลาดในการประมวลผล'); }
-          } catch (e) { alert('ไม่สามารถเชื่อมต่อเซิร์ฟเวอร์ได้'); }
-        }
-      </script>
+      <!-- ซ่อนข้อมูลที่ต้องใช้ใน Data Attributes -->
+      <div id="oauth-data" style="display: none;" data-client-id="${client_id}" data-redirect-uri="${redirect_uri}" data-state="${state || ''}" data-scope="${scope || ''}"></div>
+      <!-- โหลด Script จากไฟล์ภายนอกเพื่อหลีกเลี่ยงข้อจำกัด CSP -->
+      <script src="/public/js/oauth-consent.js"></script>
     </body>
     </html>`;
 

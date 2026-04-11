@@ -85,6 +85,7 @@ if (process.env.SENDGRID_API_KEY) {
 // ✅ Security Middleware
 app.use(helmet({
   crossOriginResourcePolicy: { policy: "cross-origin" }
+
 }));
 
 // ✅ Rate Limiting
@@ -168,6 +169,7 @@ app.use(express.json({ limit: '10mb' }));
 // Serve uploaded files
 app.use('/uploads', express.static('uploads'));
 app.use('/uploads/media', express.static('uploads/media'));
+app.use('/public', express.static('public')); // อนุญาตให้เสิร์ฟไฟล์ Static จากโฟลเดอร์ public
 
 // ✅ Configure Multer for file uploads
 const storage = multer.diskStorage({
