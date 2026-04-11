@@ -6,6 +6,125 @@ const OAuthToken = require('../models/OAuthToken');
 const User = require('../models/User');
 const authMiddleware = require('../middlewares/auth'); // นำ Middleware มาใช้
 
+// 0. แสดงหน้าเว็บ Consent สำหรับให้ผู้ใช้ Login และกดยืนยัน (GET)
+router.get('/authorize', async (req, res) => {
+  try {
+    const { client_id, redirect_uri, response_type, scope, state } = req.query;
+
+    // ตรวจสอบพารามิเตอร์เบื้องต้น
+    if (!client_id || !redirect_uri) {
+      return res.status(400).send('Missing client_id or redirect_uri');
+    }
+
+    // ตรวจสอบว่าแอปมีอยู่จริง
+    const app = await OAuthApp.findOne({ clientId: client_id });
+    if (!app) {
+      return res.status(400).send('Invalid Client ID');
+    }
+
+    // สร้าง HTML แบบฝัง (Stand-alone) สำหรับหน้า Consent
+    const html = `
+    <!DOCTYPE html>
+    <html lang="th">
+    <head>
+      <meta charset="UTF-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>Authorize ${app.appName}</title>
+      <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f4f7f6; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
+        .container { background-color: white; padding: 30px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.08); width: 100%; max-width: 380px; text-align: center; }
+        .app-logo { width: 80px; height: 80px; border-radius: 15px; object-fit: cover; margin-bottom: 15px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        h2 { margin-top: 0; color: #333; font-size: 22px; }
+        p { color: #666; margin-bottom: 25px; line-height: 1.5; font-size: 15px; }
+        .btn { width: 100%; padding: 12px; margin-bottom: 10px; border: none; border-radius: 8px; font-size: 16px; cursor: pointer; transition: 0.2s; font-weight: bold; }
+        .btn-allow { background-color: #1FAE4B; color: white; }
+        .btn-allow:hover { background-color: #178c3b; }
+        .btn-deny { background-color: #f44336; color: white; }
+        .btn-deny:hover { background-color: #d32f2f; }
+        .input-group { text-align: left; margin-bottom: 15px; }
+        .input-group label { display: block; margin-bottom: 5px; color: #444; font-size: 14px; font-weight: bold; }
+        .input-group input { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 8px; box-sizing: border-box; font-size: 15px; }
+        .input-group input:focus { outline: none; border-color: #1FAE4B; }
+        #login-section, #consent-section { display: none; }
+      </style>
+    </head>
+    <body>
+      <div class="container">
+        <img src="${app.appLogo || 'https://via.placeholder.com/80'}" alt="App Logo" class="app-logo" onerror="this.src='https://via.placeholder.com/80'">
+        <h2>เชื่อมต่อด้วย ChatChat</h2>
+        
+        <div id="login-section">
+          <p>กรุณาเข้าสู่ระบบเพื่ออนุญาตให้<br><b>${app.appName}</b> เข้าถึงข้อมูลของคุณ</p>
+          <div class="input-group">
+            <label>อีเมล</label>
+            <input type="email" id="email" placeholder="you@example.com">
+          </div>
+          <div class="input-group">
+            <label>รหัสผ่าน</label>
+            <input type="password" id="password" placeholder="••••••••">
+          </div>
+          <button class="btn btn-allow" onclick="login()">เข้าสู่ระบบ</button>
+          <div id="login-error" style="color: #f44336; margin-top: 10px; display: none; font-size: 14px;">อีเมลหรือรหัสผ่านไม่ถูกต้อง</div>
+        </div>
+
+        <div id="consent-section">
+          <p>แอปพลิเคชัน <b>${app.appName}</b><br>ต้องการขอสิทธิ์เข้าถึงข้อมูลโปรไฟล์พื้นฐานของคุณ</p>
+          <button class="btn btn-allow" onclick="submitConsent(true)">อนุญาตให้เข้าถึง (Allow)</button>
+          <button class="btn btn-deny" onclick="submitConsent(false)">ปฏิเสธ (Deny)</button>
+        </div>
+      </div>
+
+      <script>
+        const token = localStorage.getItem('chatchat_oauth_token');
+        if (token) { document.getElementById('consent-section').style.display = 'block'; }
+        else { document.getElementById('login-section').style.display = 'block'; }
+
+        async function login() {
+          const email = document.getElementById('email').value;
+          const password = document.getElementById('password').value;
+          const errorDiv = document.getElementById('login-error');
+          errorDiv.style.display = 'none';
+          try {
+            const res = await fetch('/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password }) });
+            const data = await res.json();
+            if (data.success) {
+              localStorage.setItem('chatchat_oauth_token', data.authToken);
+              document.getElementById('login-section').style.display = 'none';
+              document.getElementById('consent-section').style.display = 'block';
+            } else { errorDiv.innerText = data.error || 'เข้าสู่ระบบไม่สำเร็จ'; errorDiv.style.display = 'block'; }
+          } catch (e) { errorDiv.innerText = 'ไม่สามารถเชื่อมต่อเซิร์ฟเวอร์ได้'; errorDiv.style.display = 'block'; }
+        }
+
+        async function submitConsent(approved) {
+          const token = localStorage.getItem('chatchat_oauth_token');
+          try {
+            const res = await fetch('/api/oauth/authorize', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+              body: JSON.stringify({ client_id: '${client_id}', redirect_uri: '${redirect_uri}', state: '${state || ''}', scope: '${scope || ''}', approved })
+            });
+            if (res.status === 401) {
+              localStorage.removeItem('chatchat_oauth_token');
+              document.getElementById('consent-section').style.display = 'none';
+              document.getElementById('login-section').style.display = 'block';
+              return;
+            }
+            const data = await res.json();
+            if (data.success && data.redirect_url) { window.location.href = data.redirect_url; } 
+            else { alert(data.error || 'เกิดข้อผิดพลาดในการประมวลผล'); }
+          } catch (e) { alert('ไม่สามารถเชื่อมต่อเซิร์ฟเวอร์ได้'); }
+        }
+      </script>
+    </body>
+    </html>`;
+
+    res.send(html);
+  } catch (error) {
+    console.error('OAuth GET Authorize Error:', error);
+    res.status(500).send('Internal Server Error');
+  }
+});
+
 // 1. รับการกด "อนุญาต" หรือ "ปฏิเสธ" จากแอป ChatChat
 router.post('/authorize', authMiddleware, async (req, res) => {
   try {
