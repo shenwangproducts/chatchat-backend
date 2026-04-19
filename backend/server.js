@@ -12,6 +12,7 @@ require('dotenv').config();
 const { v2: cloudinary } = require('cloudinary');
 const cloudinaryStorage = require('multer-storage-cloudinary');
 const crypto = require('crypto');
+const generatePayload = require('promptpay-qr');
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 
 const admin = require('firebase-admin');
@@ -1809,6 +1810,47 @@ app.post('/api/wallet/stripe/create-intent', authenticateToken, async (req, res)
     });
   } catch (error) {
     console.error('❌ Stripe Credit Card Error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// 💳 Generate Raw PromptPay Payload (สำหรับวาด QR Code เองในแอป)
+app.post('/api/wallet/promptpay/payload', authenticateToken, async (req, res) => {
+  try {
+    const { amount, coinAmount } = req.body;
+
+    if (!amount || amount <= 0) {
+      return res.status(400).json({ success: false, error: 'Amount is required' });
+    }
+
+    // ⚠️ ใส่เบอร์โทรศัพท์ที่ผูกพร้อมเพย์ หรือ รหัสบัตรประชาชน หรือ Biller ID (ตั้งเป็น Environment Variable ได้)
+    const promptpayId = process.env.PROMPTPAY_ID || '0812345678'; 
+
+    // ⚙️ สร้าง Payload String ตามมาตรฐาน EMVCo
+    const payload = generatePayload(promptpayId, { amount: parseFloat(amount) });
+
+    // บันทึก Transaction เพื่ออ้างอิงสถานะรอการชำระเงิน (Pending)
+    const wallet = await Wallet.findOne({ userId: req.user._id });
+    const transaction = new Transaction({
+      userId: req.user._id,
+      walletId: wallet ? wallet._id : null,
+      type: 'topup',
+      amount: parseFloat(amount),
+      currency: 'THB',
+      description: `PromptPay QR Topup: ${coinAmount || 0} Coins`,
+      status: 'pending',
+      referenceId: `PP_${Date.now()}`
+    });
+    await transaction.save();
+
+    res.status(200).json({
+      success: true,
+      payload: payload,           // ส่งข้อความนี้ (เช่น "00020101021129370016...") ไปให้แอปวาด
+      transactionId: transaction._id
+    });
+
+  } catch (error) {
+    console.error('❌ Generate PromptPay Payload Error:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
