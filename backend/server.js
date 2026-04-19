@@ -1512,7 +1512,83 @@ app.get('/api/wallet/rewards', authenticateToken, async (req, res) => {
   }
 });
 
-// 💰 Add Coin Points
+// � Get Coin Packages (สำหรับให้ Frontend เลือกซื้อ)
+app.get('/api/wallet/coin-packages', async (req, res) => {
+  try {
+    console.log('📦 Fetching coin packages');
+
+    // ✅ กำหนด packages เงิน (ราคา 1:1 = coin + bonus)
+    const coinPackages = [
+      {
+        id: 'pkg_50',
+        label: '50 Coins',
+        amount: 50,           // ฿50
+        coinAmount: 50,       // 50 coins
+        bonus: 0,             // ไม่มีโบนัส
+        totalCoins: 50,       // รวม coins
+        savings: '0%',
+        recommended: false
+      },
+      {
+        id: 'pkg_100',
+        label: '100 Coins',
+        amount: 100,          // ฿100
+        coinAmount: 100,      // 100 coins
+        bonus: 0,             // ไม่มีโบนัส
+        totalCoins: 100,      // รวม coins
+        savings: '0%',
+        recommended: false
+      },
+      {
+        id: 'pkg_300',
+        label: '300 Coins + 30 Bonus',
+        amount: 300,          // ฿300
+        coinAmount: 300,      // 300 coins
+        bonus: 30,            // 🎁 แถม 30
+        totalCoins: 330,      // รวม coins
+        savings: '10%',
+        recommended: true     // ⭐ แนะนำ
+      },
+      {
+        id: 'pkg_500',
+        label: '500 Coins + 50 Bonus',
+        amount: 500,          // ฿500
+        coinAmount: 500,      // 500 coins
+        bonus: 50,            // 🎁 แถม 50
+        totalCoins: 550,      // รวม coins
+        savings: '10%',
+        recommended: false
+      },
+      {
+        id: 'pkg_1000',
+        label: '1000 Coins + 150 Bonus',
+        amount: 1000,         // ฿1000
+        coinAmount: 1000,     // 1000 coins
+        bonus: 150,           // 🎁 แถม 150
+        totalCoins: 1150,     // รวม coins
+        savings: '15%',
+        recommended: false
+      }
+    ];
+
+    res.json({
+      success: true,
+      packages: coinPackages,
+      currency: 'THB',
+      paymentMethods: ['card', 'promptpay'],
+      note: '1 Coin = 1 THB (with bonus offers! 🎁)'
+    });
+
+  } catch (error) {
+    console.error('❌ Get coin packages error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch coin packages'
+    });
+  }
+});
+
+// �💰 Add Coin Points
 app.post('/api/wallet/add-coins', authenticateToken, [
   body('points')
     .isInt({ min: 1, max: 10000 })
@@ -1814,45 +1890,233 @@ app.post('/api/wallet/stripe/create-intent', authenticateToken, async (req, res)
   }
 });
 
-// 💳 Generate Raw PromptPay Payload (สำหรับวาด QR Code เองในแอป)
-app.post('/api/wallet/promptpay/payload', authenticateToken, async (req, res) => {
-  try {
-    const { amount, coinAmount } = req.body;
+// =============================================
+// 💳 STRIPE CHECKOUT SESSION (Dynamic)
+// =============================================
 
-    if (!amount || amount <= 0) {
-      return res.status(400).json({ success: false, error: 'Amount is required' });
+// 💳 Create Stripe Checkout Session (แบบไดนามิก - ไม่ต้องสร้างสินค้าใน Dashboard)
+app.post('/api/wallet/stripe/checkout-session', authenticateToken, [
+  body('amount')
+    .isFloat({ min: 1, max: 1000000 })
+    .withMessage('Amount must be between 1-1000000'),
+  body('coinAmount')
+    .isInt({ min: 1 })
+    .withMessage('Coin amount must be a positive integer')
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ success: false, error: errors.array()[0].msg });
     }
 
-    // ⚠️ ใส่เบอร์โทรศัพท์ที่ผูกพร้อมเพย์ หรือ รหัสบัตรประชาชน หรือ Biller ID (ตั้งเป็น Environment Variable ได้)
-    const promptpayId = process.env.PROMPTPAY_ID || '0812345678'; 
+    const { amount, coinAmount } = req.body;
+    const userId = req.user._id.toString();
 
-    // ⚙️ สร้าง Payload String ตามมาตรฐาน EMVCo
-    const payload = generatePayload(promptpayId, { amount: parseFloat(amount) });
+    console.log(`💳 Creating Stripe Checkout Session for user ${userId}, Amount: ${amount} THB, Coins: ${coinAmount}`);
 
-    // บันทึก Transaction เพื่ออ้างอิงสถานะรอการชำระเงิน (Pending)
-    const wallet = await Wallet.findOne({ userId: req.user._id });
-    const transaction = new Transaction({
-      userId: req.user._id,
-      walletId: wallet ? wallet._id : null,
-      type: 'topup',
-      amount: parseFloat(amount),
-      currency: 'THB',
-      description: `PromptPay QR Topup: ${coinAmount || 0} Coins`,
-      status: 'pending',
-      referenceId: `PP_${Date.now()}`
+    // สร้าง Checkout Session ด้วยสินค้าแบบไดนามิก (ไม่ต้องสร้างใน Dashboard)
+    const session = await stripe.checkout.sessions.create({
+      payment_method_types: ['card', 'promptpay'],
+      line_items: [
+        {
+          price_data: {
+            currency: 'thb',
+            product_data: {
+              name: `Coin Package - ${coinAmount} Coins`,
+              description: `Topup wallet with ${coinAmount} coins`,
+              images: ['https://via.placeholder.com/300x300?text=Coins'], // สามารถใส่ URL รูปสินค้าเอง
+            },
+            unit_amount: Math.round(parseFloat(amount) * 100), // แปลงบาทเป็นสตางค์
+          },
+          quantity: 1,
+        },
+      ],
+      mode: 'payment',
+      success_url: `${process.env.FRONTEND_URL || 'https://localhost:3000'}/payment-success?session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${process.env.FRONTEND_URL || 'https://localhost:3000'}/payment-cancel`,
+      customer_email: req.user.email,
+      metadata: {
+        userId: userId,
+        coinAmount: coinAmount.toString(),
+        type: 'coin_topup',
+      },
     });
-    await transaction.save();
+
+    console.log('✅ Stripe Checkout Session created successfully:', {
+      sessionId: session.id,
+      url: session.url,
+      userId: userId
+    });
 
     res.status(200).json({
       success: true,
-      payload: payload,           // ส่งข้อความนี้ (เช่น "00020101021129370016...") ไปให้แอปวาด
-      transactionId: transaction._id
+      message: 'Checkout session created successfully',
+      url: session.url, // ส่ง URL ให้แอปนำทางไปยังหน้าชำระเงิน
+      sessionId: session.id
     });
 
   } catch (error) {
-    console.error('❌ Generate PromptPay Payload Error:', error);
-    res.status(500).json({ success: false, error: error.message });
+    console.error('❌ Stripe Checkout Session Error:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: error.message 
+    });
   }
+});
+
+// =============================================
+// 💳 STRIPE PAYMENT LINK (Dynamic)
+// =============================================
+
+// 💳 Create Stripe Payment Link (แบบไดนามิก - ส่งลิงก์โดยตรง)
+app.post('/api/wallet/stripe/payment-link', authenticateToken, [
+  body('amount')
+    .isFloat({ min: 1, max: 1000000 })
+    .withMessage('Amount must be between 1-1000000'),
+  body('coinAmount')
+    .isInt({ min: 1 })
+    .withMessage('Coin amount must be a positive integer')
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ success: false, error: errors.array()[0].msg });
+    }
+
+    const { amount, coinAmount } = req.body;
+    const userId = req.user._id.toString();
+
+    console.log(`💳 Creating Stripe Payment Link for user ${userId}, Amount: ${amount} THB, Coins: ${coinAmount}`);
+
+    // สร้าง Payment Link ด้วยสินค้าแบบไดนามิก
+    const paymentLink = await stripe.paymentLinks.create({
+      line_items: [
+        {
+          price_data: {
+            currency: 'thb',
+            product_data: {
+              name: `Coin Package - ${coinAmount} Coins`,
+              description: `Topup wallet with ${coinAmount} coins via Payment Link`,
+            },
+            unit_amount: Math.round(parseFloat(amount) * 100), // สตางค์
+          },
+          quantity: 1,
+        },
+      ],
+      metadata: {
+        userId: userId,
+        coinAmount: coinAmount.toString(),
+        type: 'coin_topup',
+      },
+    });
+
+    console.log('✅ Stripe Payment Link created successfully:', {
+      linkId: paymentLink.id,
+      url: paymentLink.url,
+      userId: userId
+    });
+
+    res.status(200).json({
+      success: true,
+      message: 'Payment link created successfully',
+      url: paymentLink.url, // ลิงก์แบบยาว ที่สามารถแชร์หรือ redirect ได้
+      linkId: paymentLink.id
+    });
+
+  } catch (error) {
+    console.error('❌ Stripe Payment Link Error:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: error.message 
+    });
+  }
+});
+
+// 💳 Create Stripe PromptPay Payment Intent (Recommended)
+// ⚠️ OLD Endpoint /api/wallet/promptpay/payload → DEPRECATED
+// ✅ NEW Endpoint: /api/wallet/promptpay/payment (ใช้ Stripe PromptPay)
+app.post('/api/wallet/promptpay/payment', authenticateToken, [
+  body('amount')
+    .isFloat({ min: 1, max: 1000000 })
+    .withMessage('Amount must be between 1-1000000'),
+  body('coinAmount')
+    .isInt({ min: 1 })
+    .withMessage('Coin amount must be a positive integer')
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ success: false, error: errors.array()[0].msg });
+    }
+
+    const { amount, coinAmount } = req.body;
+    const userId = req.user._id.toString();
+
+    console.log(`💳 Creating Stripe PromptPay Payment for user ${userId}, Amount: ${amount} THB, Coins: ${coinAmount}`);
+
+    // ✅ ใช้ Stripe Payment Intent สำหรับ PromptPay
+    // Stripe จะตรวจสอบการชำระโดยอัตโนมัติ
+    const paymentIntent = await stripe.paymentIntents.create({
+      amount: Math.round(parseFloat(amount) * 100), // แปลงบาทเป็นสตางค์
+      currency: 'thb',
+      payment_method_types: ['promptpay'],
+      confirm: true, // บังคับ confirm เพื่อให้ Stripe สร้าง QR Code
+      return_url: `${process.env.FRONTEND_URL || 'https://localhost:3000'}/promptpay-success?payment_intent={PAYMENT_INTENT}`,
+      receipt_email: req.user.email,
+      metadata: {
+        userId: userId,
+        coinAmount: coinAmount.toString(),
+        type: 'promptpay_topup'
+      },
+      description: `PromptPay Top-up: ${coinAmount} coins`
+    });
+
+    console.log('✅ Stripe PromptPay Payment Intent created:', {
+      paymentIntentId: paymentIntent.id,
+      status: paymentIntent.status,
+      userId: userId
+    });
+
+    // ✅ ดึง QR Code URL จาก Stripe
+    const qrCodeUrl = 
+      paymentIntent.next_action?.promptpay_display_url || 
+      paymentIntent.next_action?.promptpay_display_details?.hosted_voucher_url || 
+      paymentIntent.next_action?.use_stripe_sdk?.stripe_url ||
+      '';
+
+    res.status(200).json({
+      success: true,
+      message: 'PromptPay payment ready',
+      paymentIntentId: paymentIntent.id,
+      clientSecret: paymentIntent.client_secret,
+      qrCodeUrl: qrCodeUrl, // ✅ QR Code จาก Stripe
+      status: paymentIntent.status, // 'requires_payment_method' → 'succeeded'
+      amount: amount,
+      coinAmount: coinAmount
+    });
+
+  } catch (error) {
+    console.error('❌ Stripe PromptPay Payment Error:', error.message);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// ⚠️ DEPRECATED: Old endpoint (คงไว้เพื่อ backward compatibility)
+// ❌ ห้ามใช้ - ไม่มี webhook ตรวจสอบ
+app.post('/api/wallet/promptpay/payload', authenticateToken, async (req, res) => {
+  console.warn('⚠️ DEPRECATED: /api/wallet/promptpay/payload is deprecated!');
+  console.warn('✅ USE NEW ENDPOINT: POST /api/wallet/promptpay/payment instead');
+  
+  return res.status(410).json({
+    success: false,
+    error: 'This endpoint is deprecated',
+    message: 'Please use POST /api/wallet/promptpay/payment instead',
+    reason: 'Old endpoint does not support automatic payment verification',
+    newEndpoint: '/api/wallet/promptpay/payment'
+  });
 });
 
 // 🆔 Start Identity Verification - FIXED VERSION
