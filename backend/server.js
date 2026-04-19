@@ -2032,8 +2032,7 @@ app.post('/api/wallet/stripe/payment-link', authenticateToken, [
   }
 });
 
-// 💳 Create Stripe PromptPay Payment Intent (Recommended)
-// ⚠️ OLD Endpoint /api/wallet/promptpay/payload → DEPRECATED
+
 // ✅ NEW Endpoint: /api/wallet/promptpay/payment (ใช้ Stripe PromptPay)
 app.post('/api/wallet/promptpay/payment', authenticateToken, [
   body('amount')
@@ -2060,6 +2059,12 @@ app.post('/api/wallet/promptpay/payment', authenticateToken, [
       amount: Math.round(parseFloat(amount) * 100), // แปลงบาทเป็นสตางค์
       currency: 'thb',
       payment_method_types: ['promptpay'],
+        payment_method_data: {
+          type: 'promptpay',
+          billing_details: {
+            email: req.user.email || 'user@example.com' 
+          }
+        },
       confirm: true, // บังคับ confirm เพื่อให้ Stripe สร้าง QR Code
       return_url: `${process.env.FRONTEND_URL || 'https://localhost:3000'}/promptpay-success?payment_intent={PAYMENT_INTENT}`,
       receipt_email: req.user.email,
